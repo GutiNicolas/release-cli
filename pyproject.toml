@@ -1,0 +1,22 @@
+[project]
+name = "release-cli"
+version = "0.1.0"
+description = "CLI for Maven, Gradle, and sbt release candidates and final versions"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "GPL-3.0-only" }
+dependencies = []
+
+[project.scripts]
+release = "release_cli.cli:main"
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
