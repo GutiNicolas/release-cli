@@ -16,6 +16,15 @@ chmod +x install.sh
 ./install.sh
 ```
 
+`install.sh` records the clone in `~/.config/release/source.toml` (remote, branch, path). After that, update from any directory:
+
+```sh
+release update              # git pull in the clone + uv tool install --force; prints old -> new version
+release update --defaults   # accept the default of any new config key without asking
+```
+
+`release update` needs the clone to be clean (it stops before pulling otherwise). Existing config is kept: only a global key this version adds, or one whose meaning changed, is asked once, and `config_version` is saved in `~/.config/release/release.toml`. It never updates connectors (`release connector update <name>`), never rewrites `connectors.toml`, and never touches a project's `.release`. Without `source.toml` it falls back to uv's install receipt; with neither, it tells you how to reinstall.
+
 If `release` is not found:
 
 ```sh
