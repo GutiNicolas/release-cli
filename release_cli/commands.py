@@ -15,12 +15,12 @@ from pathlib import Path
 from typing import Any
 
 from release_cli import connectors as cx
-from release_cli import cursor_review, gitops, prompts
+from release_cli import cursor_review, gitops, prompts, update
 from release_cli.config import LOCAL_NAME, TEAM_NAME, Config, ConfigError, load, load_layers, set_connector_value, update_file
 from release_cli.ui import fail, info, warn
 from release_cli.versioning import PlanError, parse
 
-COMMANDS = ("connector", "connectors", "hook", "edit")
+COMMANDS = ("connector", "connectors", "hook", "edit", "update")
 GITHUB_URL = re.compile(r"^(https://[^/@\s]+/[^/@\s]+/[^/@\s]+?)(?:\.git)?/?(?:@(\S+))?$")
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 SLACK_WARNING = (
@@ -85,6 +85,16 @@ def build_parser() -> argparse.ArgumentParser:
     hadd.add_argument("--default", choices=("y", "n"), default="y", help="answer taken on Enter or with --defaults")
     hadd.add_argument("--team", action="store_true", help=f"write to {TEAM_NAME} instead of {LOCAL_NAME}")
 
+    upd = sub.add_parser(
+        "update",
+        help="pull the release-cli clone and reinstall it (from any directory); asks only new config keys",
+        description="Pull the release-cli clone (source.toml or the uv receipt), reinstall with uv, ask only new or "
+        "changed global config keys. Never updates connectors, connectors.toml, or project .release files.",
+    )
+    _defaults_flag(upd)
+    upd.add_argument("--config-only", action="store_true", help=argparse.SUPPRESS)
+    upd.add_argument("--after-install", metavar="CLONE", help=argparse.SUPPRESS)
+
     edit = sub.add_parser("edit", help="edit hooks, connectors, order, and connector config (interactive without args)")
     edit.add_argument("words", nargs=argparse.REMAINDER, help="one editor command, e.g. `config set platform-deploy jira_project_key FRAUD`")
     return parser
@@ -101,12 +111,48 @@ def main(argv: list[str]) -> None:
                 connectors_run(ns.tag, start=ns.start, only=ns.only, defaults=ns.defaults, dry_run=ns.dry_run)
             else:
                 connectors_status(ns.tag)
+        elif ns.command == "update":
+            update_command(ns)
         elif ns.command == "hook":
             hook_add(Path.cwd(), when=ns.when, cmd=ns.cmd, url=ns.url, default=ns.default == "y", team=ns.team)
         else:
             edit(Path.cwd(), ns.words)
-    except (cx.ConnectorError, ConfigError, gitops.GitError, prompts.PromptError) as exc:
+    except (cx.ConnectorError, ConfigError, gitops.GitError, prompts.PromptError, update.UpdateError) as exc:
         fail(str(exc))
+
+
+# ---------- update ----------
+
+
+def update_command(ns: argparse.Namespace) -> None:
+    if ns.after_install:
+        after_install(Path(ns.after_install), defaults=ns.defaults or not sys.stdin.isatty())
+    elif ns.config_only:
+        asked = update.ensure_config(defaults=ns.defaults, log=info)
+        info(f"config saved: {', '.join(asked)}" if asked else "config: nothing new to ask")
+    else:
+        update.update(defaults=ns.defaults, log=info)
+
+
+def after_install(root: Path, *, defaults: bool, ask: prompts.Ask = input) -> None:
+    """install.sh: remember the clone; offer cursor-review only on first install (notify unset); then new keys."""
+    if update.register_source(root) is None:
+        warn(f"{root} is not a git clone; `release update` will not find it (reinstall from {update.INSTALL_URL})")
+    data = cx.load_release_toml()
+    if "notify" not in data.get("cursor-review", {}):
+        enable = prompts.ask_bool(
+            "Enable cursor-review (local Cursor agent looks at errors 10 min after a deploy, desktop notification)?",
+            False,
+            defaults=defaults,
+            ask=ask,
+        )
+        data.setdefault("cursor-review", {})["notify"] = enable
+        cx.save_release_toml(data)
+        if enable and "cursor-review" not in cx.load_global()["connectors"]:
+            connector_add("cursor-review", defaults=True)
+        elif not enable:
+            info("cursor-review off. Enable later: release connector add cursor-review")
+    update.ensure_config(defaults=defaults, ask=ask, log=info)
 
 
 # ---------- connector install ----------
@@ -196,7 +242,7 @@ def connector_add(target: str, *, defaults: bool, ask: prompts.Ask = input) -> N
     if target in cx.BUILTINS:
         base: dict[str, Any] = {"builtin": True}
         if target not in g["connectors"]:
-            base["config"] = {"notify": True, "slack_cloud": False, "delay_minutes": 10}
+            base["config"] = {"slack_cloud": False, "delay_minutes": 10}
         register(g, [target], base, break_default=False, defaults=defaults, ask=ask)
         cx.save_global(g)
         info(f"{target}: built in, order {g['order'].index(target) + 1}")
@@ -449,7 +495,9 @@ def show(cwd: Path) -> None:
             f"  {idx}. {conn.name} (order: {conn.origin['order']})  enabled={'y' if conn.enabled else 'n'} ({conn.origin['enabled']})"
             f"  break_on_error={'y' if conn.break_on_error else 'n'} (global)"
         )
-        values: dict[str, tuple[Any, str]] = {k: (v, "connectors.toml") for k, v in g["connectors"][conn.name].get("config", {}).items()}
+        registry = cx.load_release_toml().get(conn.name, {})
+        values: dict[str, tuple[Any, str]] = {k: (v, "~/.config/release/release.toml") for k, v in registry.items()}
+        values.update({k: (v, "connectors.toml") for k, v in g["connectors"][conn.name].get("config", {}).items()})
         for layer, label in ((team, TEAM_NAME), (local, LOCAL_NAME)):
             for k, v in (layer.connectors.get(conn.name, {}) if layer else {}).items():
                 values[k] = (v, label)
@@ -558,6 +606,12 @@ def _set_connector_flag(cwd: Path, name: str, key: str, value: bool, *, project:
 
 
 def _global_set(name: str, key: str, value: Any) -> None:
+    if any(k.table == name and k.name == key for k in update.REGISTRY):
+        data = cx.load_release_toml()
+        data.setdefault(name, {})[key] = value
+        cx.save_release_toml(data)
+        info(f"{name}.{key} saved in {cx.release_toml_path()}")
+        return
     g = cx.load_global()
     if name not in g["connectors"]:
         raise cx.ConnectorError(f"unknown connector {name!r}")
