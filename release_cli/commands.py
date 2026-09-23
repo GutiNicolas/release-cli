@@ -209,11 +209,6 @@ def connector_add(target: str, *, defaults: bool, ask: prompts.Ask = input) -> N
         raise cx.ConnectorError(f"{url} installs no `release.connectors` entry points")
     base = {"source": url, "ref": ref, "sha": sha, "dist": eps[0]["dist"]}
     names = [ep["name"] for ep in eps]
-    for name in names:
-        g["connectors"].setdefault(name, {})
-    fresh = [n for n in names if not g["connectors"][n]]
-    for n in fresh:
-        del g["connectors"][n]
     added = register(g, names, base, break_default=True, defaults=defaults, ask=ask)
     for name in names:
         g["connectors"][name]["entry_point"] = name
