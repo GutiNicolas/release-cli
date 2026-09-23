@@ -73,6 +73,23 @@ def reset_hard(sha: str) -> None:
     run(["git", "reset", "--hard", sha])
 
 
+def tag_commit(name: str) -> str:
+    return _out(["git", "rev-parse", f"refs/tags/{name}^{{commit}}"])
+
+
+def fetch_tag(name: str) -> None:
+    _out(["git", "fetch", "origin", f"refs/tags/{name}:refs/tags/{name}"])
+
+
+def remote_url() -> str:
+    result = run(["git", "remote", "get-url", "origin"], check=False)
+    return result.stdout.strip() if result.returncode == 0 else ""
+
+
+def toplevel() -> str:
+    return _out(["git", "rev-parse", "--show-toplevel"])
+
+
 def push_atomic(tags: list[str]) -> None:
     args = ["git", "push", "--atomic", "origin", "HEAD", *tags]
     try:

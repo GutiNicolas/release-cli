@@ -50,19 +50,41 @@ def ask_text(
     required: bool = True,
     defaults: bool = False,
     ask: Ask = input,
+    validate: Callable[[str], str | None] = lambda _v: None,
 ) -> str:
+    """`validate` returns an error message or None. Invalid input is asked again; under defaults it raises."""
     if defaults:
-        if default is not None:
-            return default
-        if not required:
+        if default is None and not required:
             return ""
-        raise PromptError(f"no value for: {prompt}")
+        if default is None:
+            raise PromptError(f"no value for: {prompt}")
+        if (err := validate(default)) is not None:
+            raise PromptError(f"default {default!r} for {prompt!r} is invalid: {err}")
+        return default
     hint = f" [{default}]" if default else ""
     while True:
         raw = ask(f"{prompt}{hint}: ").strip()
-        if raw:
+        if not raw:
+            if default is not None:
+                raw = default
+            elif not required:
+                return ""
+            else:
+                continue
+        err = validate(raw)
+        if err is None:
             return raw
-        if default is not None:
-            return default
-        if not required:
-            return ""
+        print(f"  {err}")
+
+
+def int_error(raw: str, lo: int | None, hi: int | None) -> str | None:
+    try:
+        value = int(raw)
+    except ValueError:
+        return "enter a whole number"
+    if lo is not None and value < lo:
+        return f"must be >= {lo}"
+    if hi is not None and value > hi:
+        return f"must be <= {hi}"
+    return None
+
