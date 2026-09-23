@@ -137,6 +137,23 @@ def test_interrupted_job_is_repolled_not_relaunched(repo: Path, capsys: pytest.C
     assert "platform-build: ok" in capsys.readouterr().out
 
 
+def test_connectors_run_from_blocked_deploy_exits_1_with_reason(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    install_fakes(("platform-build", "fail"), ("platform-deploy", "blocked"), platform_build={"break_on_error": False})
+    with pytest.raises(SystemExit):
+        main(["-rc", "--defaults"])
+    capsys.readouterr()
+    with pytest.raises(SystemExit) as exc:
+        main(["connectors", "run", "1.5.0-rc0", "--from", "platform-deploy", "--defaults"])
+    assert exc.value.code == 1
+    captured = capsys.readouterr()
+    assert (
+        "platform-deploy: failed: blocked: platform-build did not reach SUCCESS (FAILURE: tests failed); "
+        "deploy needs a SUCCESS build"
+    ) in captured.out
+    assert "does not apply" not in captured.out
+    assert "a connector did not finish for 1.5.0-rc0" in captured.err
+
+
 def test_connectors_run_refuses_unpushed_tag(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
     install_fakes(("platform-build", "echo"))
     with pytest.raises(SystemExit):

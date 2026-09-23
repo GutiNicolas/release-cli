@@ -199,6 +199,10 @@ class Questions:
     applies: bool
     timeout_seconds: float | None
     items: list[Question]
+    # applies=false + blocked=true: a prerequisite in `prior` failed (recorded failed, exit 1).
+    # applies=false alone: this project is not for the connector (skipped, exit 0).
+    blocked: bool = False
+    reason: str | None = None
 
 
 @dataclass
@@ -235,6 +239,14 @@ def parse_questions(resp: Any) -> Questions:
     applies = resp.get("applies", True)
     if not isinstance(applies, bool):
         raise ProtocolError("applies must be true or false")
+    blocked = resp.get("blocked", False)
+    if not isinstance(blocked, bool):
+        raise ProtocolError("blocked must be true or false")
+    if blocked and applies:
+        raise ProtocolError("blocked needs applies false")
+    reason = resp.get("reason")
+    if reason is not None and not isinstance(reason, str):
+        raise ProtocolError("reason must be a string")
     timeout = resp.get("timeout_seconds")
     if timeout is not None and (not _is_number(timeout) or timeout <= 0):
         raise ProtocolError("timeout_seconds must be a positive number")
@@ -245,7 +257,13 @@ def parse_questions(resp: Any) -> Questions:
     seen: set[str] = set()
     for idx, item in enumerate(raw):
         items.append(_parse_question(item, idx, seen))
-    return Questions(applies=applies, timeout_seconds=float(timeout) if timeout else None, items=items)
+    return Questions(
+        applies=applies,
+        timeout_seconds=float(timeout) if timeout else None,
+        items=items,
+        blocked=blocked,
+        reason=reason.strip() if reason and reason.strip() else None,
+    )
 
 
 def _parse_question(item: Any, idx: int, seen: set[str]) -> Question:
@@ -655,8 +673,14 @@ def run_chain(
         log(f"CONNECTOR {conn.name}" + (f" (resuming job {resume_job})" if resume_job else ""))
         try:
             qs = ask_questions(conn, {**request, "action": "questions"})
+            if qs.blocked and dry_run:
+                log(f"  (dry-run: {conn.name} would be blocked: {qs.reason or 'prerequisite not met'})")
+                continue
+            if qs.blocked:
+                raise ConnectorError(f"blocked: {qs.reason or 'a prerequisite failed (the connector gave no reason)'}")
             if not qs.applies:
-                log(f"skipping {conn.name}: does not apply to this repo")
+                why = f": {qs.reason}" if qs.reason else " (the connector gave no reason)"
+                log(f"skipping {conn.name}: does not apply to this project{why}")
                 continue
             if dry_run:
                 for q in qs.items:
