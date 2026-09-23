@@ -22,7 +22,8 @@ def _paint(color: str, text: str) -> str:
 
 
 def info(msg: str) -> None:
-    print(msg)
+    # Flushed so a piped stdout (CI, `| tee`) keeps its place among connector stderr lines.
+    print(msg, flush=True)
 
 
 def warn(msg: str) -> None:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -149,3 +150,14 @@ def test_state_file_is_plain_json(repo: Path) -> None:
     path = connectors.state_path("fraud-juggler", "1.5.0-rc0")
     data = json.loads(path.read_text(encoding="utf-8"))
     assert data["tags"] == list(TAGS) and data["connectors"]["platform-build"]["status"] == "ok"
+
+
+def test_log_lines_stay_in_order_with_connector_stderr_when_piped(repo: Path) -> None:
+    install_fakes(("platform-build", "questions-exit"))
+    out = subprocess.run(
+        [sys.executable, "-c", "from release_cli.cli import main; main(['-rc', '--defaults'])"],
+        cwd=repo, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+        env={**os.environ, "PYTHONPATH": str(Path(__file__).resolve().parents[1])},
+    ).stdout
+    assert out.index("RELEASE fraud-juggler-1.5.0-rc0 FINISHED!") < out.index("CONNECTOR platform-build")
+    assert out.index("CONNECTOR platform-build") < out.index("[platform-build] questions exploded")
