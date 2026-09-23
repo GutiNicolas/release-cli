@@ -48,7 +48,7 @@ printf '%s\n' "Installed: $bin"
 # Ask once. Everything is editable later with `release edit`.
 config="${XDG_CONFIG_HOME:-$HOME/.config}/release/connectors.toml"
 if [ -t 0 ] && ! grep -q '^\[connectors\.cursor-review\]' "$config" 2>/dev/null; then
-    printf '%s' "Enable cursor-review (local Cursor agent looks at errors 10 min after a deploy; macOS notification)? (y/n) [n]: "
+    printf '%s' "Enable cursor-review (local Cursor agent looks at errors 10 min after a deploy; desktop notification)? (y/n) [n]: "
     read -r answer || answer=""
     case "$answer" in
         y|Y|yes|YES) "$bin" connector add cursor-review --defaults ;;

@@ -1,7 +1,8 @@
 """Built-in connector `cursor-review`: a local Cursor `agent` looks at the deploy N minutes after SUCCESS.
 
 The release does not wait. `run` leaves a detached job (one per repo + tag) that sleeps
-until a wall-clock target, calls `agent` in ask mode, and posts a macOS notification.
+until a wall-clock target, calls `agent` in ask mode, and posts a desktop notification
+(osascript on macOS, notify-send on Linux when present).
 
     python -m release_cli.cursor_review questions|run   (protocol 1 on stdin/stdout)
     python -m release_cli.cursor_review worker <job.json>
@@ -24,7 +25,7 @@ from release_cli.connectors import data_dir
 
 DEFAULTS: dict[str, Any] = {
     "delay_minutes": 10,
-    "notify_macos": True,
+    "notify": True,
     "slack_cloud": False,
     "cloud_command": [],
     "agent_bin": "agent",
@@ -199,11 +200,28 @@ def schedule(job: dict[str, Any], *, spawn: Callable[[Path], int] = _spawn) -> d
     return job
 
 
+def _platform() -> str:
+    return sys.platform
+
+
+def notification_command(title: str, message: str) -> list[str] | None:
+    """osascript on macOS, notify-send on Linux when installed, otherwise None (no notification)."""
+    platform = _platform()
+    if platform == "darwin" and shutil.which("osascript"):
+        return ["osascript", "-e", f"display notification {json.dumps(message)} with title {json.dumps(title)}"]
+    if platform.startswith("linux") and shutil.which("notify-send"):
+        return ["notify-send", title, message]
+    return None
+
+
 def _notify(title: str, message: str, run: Callable[..., Any]) -> None:
-    if shutil.which("osascript") is None:
+    cmd = notification_command(title, message)
+    if cmd is None:
         return
-    script = f"display notification {json.dumps(message)} with title {json.dumps(title)}"
-    run(["osascript", "-e", script], check=False, capture_output=True)
+    try:
+        run(cmd, check=False, capture_output=True, timeout=10)
+    except (OSError, subprocess.SubprocessError):
+        pass  # a missing desktop session must not fail the review
 
 
 def agent_command(job: dict[str, Any]) -> list[str]:
@@ -280,7 +298,7 @@ def run(req: dict[str, Any], *, now: Callable[[], float] = time.time, spawn: Cal
             "target_at": _iso(target),
             "prompt": build_prompt(req, result, succeeded, delay, answers.get("extra_prompt") or ""),
             "cwd": req["repo_root"],
-            "notify": _truthy(cfg["notify_macos"]),
+            "notify": _truthy(cfg["notify"]),
             "cloud": cloud,
             "cloud_command": list(cfg["cloud_command"]),
             "agent_bin": cfg["agent_bin"],

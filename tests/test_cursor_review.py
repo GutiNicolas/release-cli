@@ -20,7 +20,7 @@ SUCCESS_EPOCH = 1790192400.0
 def fake_bin(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
-    for name in ("agent", "osascript"):
+    for name in ("agent", "osascript", "notify-send"):
         script = bin_dir / name
         script.write_text(
             f"#!{sys.executable}\nimport json, sys\n"
@@ -29,7 +29,9 @@ def fake_bin(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
             encoding="utf-8",
         )
         script.chmod(0o755)
-    monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
+    # Only the fakes: a real notify-send/osascript on the host must not leak into the result.
+    monkeypatch.setenv("PATH", str(bin_dir))
+    monkeypatch.setattr(cr, "_platform", lambda: "darwin")
     return tmp_path
 
 
@@ -47,7 +49,7 @@ def request(tmp_path: Path, *, extra: str = "Use the Datadog MCP.", deploy_statu
         "repo_root": str(tmp_path),
         "release_version": "1.5.0",
         "answers": {"review": True, "extra_prompt": extra},
-        "config": {"notify_macos": notify, "slack_cloud": False},
+        "config": {"notify": notify, "slack_cloud": False},
         "prior": {
             "platform-deploy": {
                 "status": "ok" if deploy_status == "SUCCESS" else "failed",
@@ -101,11 +103,66 @@ def test_target_already_passed_on_wake_runs_immediately(fake_bin: Path) -> None:
     assert len(recorded(fake_bin, "agent")) == 1
 
 
-def test_notification_off_never_calls_osascript(fake_bin: Path) -> None:
-    path = scheduled(fake_bin, notify=False)
+def _review(fake_bin: Path, **kw) -> str:
+    path = scheduled(fake_bin, **kw)
     clock = Clock(SUCCESS_EPOCH + 601)
-    cr.work(path, now=clock.now, sleep=clock.sleep)
+    return cr.work(path, now=clock.now, sleep=clock.sleep)
+
+
+@pytest.mark.parametrize("platform", ["darwin", "linux"])
+def test_notification_off_never_notifies(fake_bin: Path, monkeypatch: pytest.MonkeyPatch, platform: str) -> None:
+    monkeypatch.setattr(cr, "_platform", lambda: platform)
+    assert _review(fake_bin, notify=False) == "done"
     assert len(recorded(fake_bin, "agent")) == 1
+    assert recorded(fake_bin, "osascript") == [] and recorded(fake_bin, "notify-send") == []
+
+
+@pytest.mark.parametrize(
+    ("platform", "remove", "expect"),
+    [
+        ("darwin", None, "osascript"),
+        ("linux", None, "notify-send"),
+        ("linux", "notify-send", None),
+        ("darwin", "osascript", None),
+        ("freebsd14", None, None),
+    ],
+    ids=["macos-osascript", "linux-notify-send", "linux-without-notify-send", "macos-without-osascript", "other-os"],
+)
+def test_notification_per_platform(fake_bin: Path, monkeypatch: pytest.MonkeyPatch, platform: str, remove: str | None, expect: str | None) -> None:
+    monkeypatch.setattr(cr, "_platform", lambda: platform)
+    if remove:
+        (fake_bin / "bin" / remove).unlink()
+    assert _review(fake_bin) == "done"
+    assert len(recorded(fake_bin, "agent")) == 1
+    for tool in ("osascript", "notify-send"):
+        assert len(recorded(fake_bin, tool)) == (1 if tool == expect else 0)
+    if expect == "notify-send":
+        [argv] = recorded(fake_bin, "notify-send")
+        assert argv[0] == "release cursor-review" and "fraud-juggler 1.5.0: review finished" in argv[1]
+
+
+def test_notification_failure_never_fails_the_review(fake_bin: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(cr, "_platform", lambda: "linux")
+    real_run = subprocess.run
+
+    def run(cmd, **kw):
+        if cmd[0] == "notify-send":
+            raise subprocess.TimeoutExpired(cmd, 10)
+        return real_run(cmd, **kw)
+
+    path = scheduled(fake_bin)
+    clock = Clock(SUCCESS_EPOCH + 601)
+    assert cr.work(path, now=clock.now, sleep=clock.sleep, run=run) == "done"
+    assert cr.read_job(path)["status"] == "done"
+
+
+def test_scheduling_and_worker_use_no_darwin_only_calls(fake_bin: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The whole job on a non-darwin host: paths from XDG, detached POSIX process, no osascript."""
+    monkeypatch.setattr(cr, "_platform", lambda: "linux")
+    monkeypatch.setattr(cr.sys, "platform", "linux")
+    path = scheduled(fake_bin)
+    assert str(path).startswith(os.environ["XDG_DATA_HOME"])
+    assert _review(fake_bin) == "done"
     assert recorded(fake_bin, "osascript") == []
 
 
