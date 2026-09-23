@@ -196,7 +196,7 @@ def connector_add(target: str, *, defaults: bool, ask: prompts.Ask = input) -> N
     if target in cx.BUILTINS:
         base: dict[str, Any] = {"builtin": True}
         if target not in g["connectors"]:
-            base["config"] = {"notify_macos": True, "slack_cloud": False, "delay_minutes": 10}
+            base["config"] = {"notify": True, "slack_cloud": False, "delay_minutes": 10}
         register(g, [target], base, break_default=False, defaults=defaults, ask=ask)
         cx.save_global(g)
         info(f"{target}: built in, order {g['order'].index(target) + 1}")
