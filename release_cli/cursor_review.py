@@ -21,11 +21,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
-from release_cli.connectors import data_dir
+from release_cli.connectors import data_dir, load_release_toml
 
 DEFAULTS: dict[str, Any] = {
     "delay_minutes": 10,
-    "notify": True,
+    "notify": False,
     "slack_cloud": False,
     "cloud_command": [],
     "agent_bin": "agent",
@@ -47,7 +47,9 @@ A release was just deployed. Look for errors caused by it and report what you fi
 
 
 def settings(config: dict[str, Any]) -> dict[str, Any]:
-    return {**DEFAULTS, **config}
+    """Defaults < ~/.config/release/release.toml [cursor-review] (e.g. notify) < connector/project config."""
+    registry = load_release_toml().get("cursor-review", {})
+    return {**DEFAULTS, **(registry if isinstance(registry, dict) else {}), **config}
 
 
 def _truthy(value: Any) -> bool:

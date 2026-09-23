@@ -93,6 +93,24 @@ def save_global(data: dict[str, Any]) -> None:
     tmp.replace(path)
 
 
+def release_toml_path() -> Path:
+    """Global release-cli settings (config registry keys + config_version); not connectors, not projects."""
+    return config_dir() / "release.toml"
+
+
+def load_release_toml() -> dict[str, Any]:
+    path = release_toml_path()
+    return loads_toml(path.read_text(encoding="utf-8")) if path.is_file() else {}
+
+
+def save_release_toml(data: dict[str, Any]) -> None:
+    path = release_toml_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(dump_toml(data), encoding="utf-8")
+    tmp.replace(path)
+
+
 def check_name(name: str) -> None:
     if not NAME_RE.match(name) or name in CONNECTOR_LISTS:
         raise ConnectorError(f"invalid connector name: {name!r}")

@@ -53,7 +53,7 @@ def test_add_builtin_cursor_review_defaults(capsys: pytest.CaptureFixture[str]) 
     commands.connector_add("cursor-review", defaults=True)
     entry = connectors.load_global()["connectors"]["cursor-review"]
     assert entry["builtin"] is True and entry["break_on_error"] is False
-    assert entry["config"] == {"notify": True, "slack_cloud": False, "delay_minutes": 10}
+    assert entry["config"] == {"slack_cloud": False, "delay_minutes": 10}
     [conn] = connectors.resolve(connectors.load_global(), {})
     assert conn.command == [sys.executable, "-m", "release_cli.cursor_review"]
     commands.connector_ls()
@@ -87,10 +87,13 @@ def test_edit_config_share_and_origins(tmp_path: Path, capsys: pytest.CaptureFix
     commands.edit(tmp_path, ["config", "set", "cursor-review", "extra_prompt", "Use", "the", "Datadog", "MCP"])
     commands.edit(tmp_path, ["config", "share", "cursor-review", "extra_prompt"])
     assert "Datadog" in (tmp_path / "release.toml").read_text(encoding="utf-8")
+    commands.edit(tmp_path, ["global", "set", "cursor-review", "notify", "true"])
     commands.edit(tmp_path, ["show"])
     out = capsys.readouterr().out
     assert 'extra_prompt = "Use the Datadog MCP" (.release)' in out
-    assert "notify = true (connectors.toml)" in out
+    assert "delay_minutes = 10 (connectors.toml)" in out
+    assert "notify = true (~/.config/release/release.toml)" in out
+    assert "notify" not in connectors.global_path().read_text(encoding="utf-8")
 
 
 def test_edit_slack_cloud_warns(capsys: pytest.CaptureFixture[str]) -> None:
