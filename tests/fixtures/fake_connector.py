@@ -38,6 +38,11 @@ if action == "questions":
         time.sleep(10)
     if behavior == "not-applies":
         reply({"protocol": 1, "applies": False, "questions": []})
+    if behavior == "not-for-repo":
+        reply({"protocol": 1, "applies": False, "reason": "no Dockerfile; not a Platform service", "questions": []})
+    if behavior == "blocked":
+        reason = "platform-build did not reach SUCCESS (FAILURE: tests failed); deploy needs a SUCCESS build"
+        reply({"protocol": 1, "applies": False, "blocked": True, "reason": reason, "questions": []})
     if behavior == "types":
         reply(
             {

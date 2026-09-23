@@ -166,6 +166,39 @@ def test_not_applies_skips_run(project: Path) -> None:
     assert [r["connector"] for r in run_requests(project)] == ["b"]
 
 
+def test_not_for_this_repo_prints_the_connector_reason(project: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    install_fakes(("a", "not-for-repo"), ("b", "not-applies"))
+    ok, state = run(project)
+    assert ok and state == {}
+    out = capsys.readouterr().out
+    assert "skipping a: does not apply to this project: no Dockerfile; not a Platform service" in out
+    assert "skipping b: does not apply to this project (the connector gave no reason)" in out
+
+
+def test_blocked_prerequisite_fails_with_the_connector_reason(project: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    install_fakes(("platform-deploy", "blocked"), ("cursor-review", "echo"))
+    ok, state = run(project)
+    assert not ok
+    entry = state["platform-deploy"]
+    assert entry["status"] == "failed"
+    assert entry["error"] == "blocked: platform-build did not reach SUCCESS (FAILURE: tests failed); deploy needs a SUCCESS build"
+    assert "cursor-review" not in state
+    assert "does not apply" not in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    ("resp", "reason"),
+    [
+        ({"protocol": 1, "applies": True, "blocked": True, "questions": []}, "blocked needs applies false"),
+        ({"protocol": 1, "applies": False, "blocked": "yes", "questions": []}, "blocked must be"),
+        ({"protocol": 1, "applies": False, "reason": 3, "questions": []}, "reason must be"),
+    ],
+)
+def test_blocked_and_reason_are_validated(resp: dict[str, Any], reason: str) -> None:
+    with pytest.raises(connectors.ProtocolError, match=reason):
+        connectors.parse_questions(resp)
+
+
 def test_dry_run_shows_questions_and_never_calls_run(project: Path, capsys: pytest.CaptureFixture[str]) -> None:
     install_fakes(("a", "types"), ("b", "echo"))
     ok, state = run(project, dry_run=True)
