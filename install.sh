@@ -45,15 +45,9 @@ fi
 printf '%s\n' "Installed: $bin"
 "$bin" -h >/dev/null
 
-# Ask once. Everything is editable later with `release edit`.
-config="${XDG_CONFIG_HOME:-$HOME/.config}/release/connectors.toml"
-if [ -t 0 ] && ! grep -q '^\[connectors\.cursor-review\]' "$config" 2>/dev/null; then
-    printf '%s' "Enable cursor-review (local Cursor agent looks at errors 10 min after a deploy; desktop notification)? (y/n) [n]: "
-    read -r answer || answer=""
-    case "$answer" in
-        y|Y|yes|YES) "$bin" connector add cursor-review --defaults ;;
-        *) printf '%s\n' "cursor-review off. Enable later: release connector add cursor-review" ;;
-    esac
-fi
+# Writes ~/.config/release/source.toml (remote, branch, path of this clone) so `release update`
+# works from any directory. Asks cursor-review only if its key does not exist yet; keeps existing config.
+"$bin" update --after-install "$ROOT"
+printf '%s\n' "Update later from anywhere: release update"
 printf '%s\n' "Hooks and connectors: release edit"
 printf '%s\n' "Try: release --help"
