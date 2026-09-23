@@ -56,7 +56,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="explicit X.Y.Z when starting an RC series (mutually exclusive with --major/--minor/--patch)",
     )
     parser.add_argument("--dry-run", action="store_true", help="print the plan; do not write, commit, or run hooks")
-    parser.add_argument("-y", "--yes", action="store_true", help="accept [y] on hook prompts; non-interactive init defaults")
+    parser.add_argument(
+        "--defaults",
+        action="store_true",
+        help="take the configured default on every hook, connector, and --init question (never assumes yes)",
+    )
+    parser.add_argument("-y", "--yes", action="store_true", help="deprecated alias of --defaults; removed in the next version")
     parser.add_argument("--init", action="store_true", help="detect the build tool and write .release (never releases)")
     parser.add_argument("--force", action="store_true", help="with --init, overwrite existing config")
     parser.add_argument("--skip-hooks", action="store_true", help="do not prompt or run configured commands")
@@ -110,7 +115,7 @@ def _run_init(cwd: Path, ns: argparse.Namespace) -> Config:
             cwd,
             tool=ns.tool,
             force=ns.force,
-            yes=ns.yes,
+            defaults=ns.defaults,
             log=info,
         )
     except (InitError, AdapterError, ConfigError) as exc:
@@ -149,6 +154,9 @@ def _scm_for(cfg: Config, artifact: str, version: str, *, snapshot: bool) -> str
 
 def main(argv: list[str] | None = None) -> None:
     ns = build_parser().parse_args(argv)
+    if ns.yes:
+        print("WARNING: -y/--yes is deprecated; use --defaults (takes each configured default, not always yes)", file=sys.stderr)
+        ns.defaults = True
     cwd = Path.cwd()
     if ns.force and not ns.init:
         fail("--force is only valid with --init")
@@ -192,14 +200,14 @@ def main(argv: list[str] | None = None) -> None:
         info("HOOKS: none")
 
     if ns.dry_run:
-        run_hooks(cfg.hooks, "before", yes=False, skip=False, dry_run=True, log=info, ask=input)
+        run_hooks(cfg.hooks, "before", defaults=False, skip=False, dry_run=True, log=info, ask=input)
         preview_cfg_files = _preview_write(adapter, cwd, cfg, release_ver, artifact)
         if not preview_cfg_files:
             fail("dry-run produced no version-file changes; aborting")
         for rel, (before, after) in preview_cfg_files.items():
             info(f"--- {rel} (release) ---")
             _print_line_diff(before, after)
-        run_hooks(cfg.hooks, "after", yes=False, skip=False, dry_run=True, log=info, ask=input)
+        run_hooks(cfg.hooks, "after", defaults=False, skip=False, dry_run=True, log=info, ask=input)
         info("no files written")
         return
 
@@ -213,7 +221,7 @@ def main(argv: list[str] | None = None) -> None:
         run_hooks(
             cfg.hooks,
             "before",
-            yes=ns.yes,
+            defaults=ns.defaults,
             skip=ns.skip_hooks,
             dry_run=False,
             log=info,
@@ -228,7 +236,7 @@ def main(argv: list[str] | None = None) -> None:
         run_hooks(
             cfg.hooks,
             "after",
-            yes=ns.yes,
+            defaults=ns.defaults,
             skip=ns.skip_hooks,
             dry_run=False,
             log=info,
