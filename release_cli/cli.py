@@ -3,45 +3,46 @@
 from __future__ import annotations
 
 import argparse
-import os
 import sys
 from pathlib import Path
 
-from release_cli import adapters, gitops
+from release_cli import adapters, commands, gitops
 from release_cli.adapters.base import AdapterError
 from release_cli.config import Config, ConfigError, load
+from release_cli.connectors import ChainInterrupted, ConnectorError
 from release_cli.hooks import HookError, run_hooks
 from release_cli.init import InitError, initialize
+from release_cli.ui import GREEN, _paint, fail, info
 from release_cli.versioning import Bump, PlanError, parse, plan
 
-RED = "\033[0;31m"
-GREEN = "\033[0;32m"
-NC = "\033[0m"
+HELP_EPILOG = """\
+hooks vs connectors:
+  hook       before the push. A shell command of this repo (mvn, gradle, sbt, ...) in .release.
+             Add with `release hook add`, edit with `release edit`. A failing hook rolls back:
+             version file restored, local commits reset, local tags deleted. Nothing was pushed.
+  connector  after the push. A Python program (protocol 1, JSON over stdin/stdout) installed with
+             `release connector add <github-url>[@ref]`. Runs in order; results pass to the next.
+             A connector NEVER deletes, moves, or re-creates the tag. Once the push succeeds the tag stays.
 
+resume (state in ~/.local/share/release/runs/{repo}/{tag}.json):
+  build failed          fix it, then: release connectors run <tag>
+  deploy failed         release connectors run <tag> --from platform-deploy   (reuses the saved build result)
+  Ctrl-C during a poll  release connectors run <tag> --from <connector>        (re-polls the saved job_id)
+  one connector only    release connectors run <tag> --only cursor-review
+  what happened         release connectors status <tag>
 
-def _color() -> bool:
-    return sys.stderr.isatty() and not os.environ.get("NO_COLOR")
-
-
-def _paint(color: str, text: str) -> str:
-    if not _color():
-        return text
-    return f"{color}{text}{NC}"
-
-
-def info(msg: str) -> None:
-    print(msg)
-
-
-def fail(msg: str, code: int = 1) -> None:
-    print(_paint(RED, f"ERROR: {msg}"), file=sys.stderr)
-    raise SystemExit(code)
+commands:
+  release connector add|ls|update|remove   release connectors run|status <tag>
+  release hook add --when before|after --cmd "..."   release edit
+"""
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="release",
         description="Create a release candidate or finalize it. Rewrites only the project version field for Maven, Gradle, or sbt.",
+        epilog=HELP_EPILOG,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     mode = parser.add_mutually_exclusive_group(required=False)
     mode.add_argument("-rc", dest="rc", action="store_true", help="create or increment a release candidate")
@@ -64,7 +65,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("-y", "--yes", action="store_true", help="deprecated alias of --defaults; removed in the next version")
     parser.add_argument("--init", action="store_true", help="detect the build tool and write .release (never releases)")
     parser.add_argument("--force", action="store_true", help="with --init, overwrite existing config")
-    parser.add_argument("--skip-hooks", action="store_true", help="do not prompt or run configured commands")
+    parser.add_argument("--skip-hooks", action="store_true", help="do not prompt or run hooks (connectors still run)")
+    parser.add_argument("--skip-connectors", action="store_true", help="do not run connectors after the push")
     parser.add_argument("--tool", choices=("maven", "gradle", "sbt"), help="with --init, force this build tool")
     return parser
 
@@ -153,6 +155,10 @@ def _scm_for(cfg: Config, artifact: str, version: str, *, snapshot: bool) -> str
 
 
 def main(argv: list[str] | None = None) -> None:
+    argv = sys.argv[1:] if argv is None else argv
+    if argv and argv[0] in commands.COMMANDS:
+        commands.main(argv)
+        return
     ns = build_parser().parse_args(argv)
     if ns.yes:
         print("WARNING: -y/--yes is deprecated; use --defaults (takes each configured default, not always yes)", file=sys.stderr)
@@ -208,6 +214,12 @@ def main(argv: list[str] | None = None) -> None:
             info(f"--- {rel} (release) ---")
             _print_line_diff(before, after)
         run_hooks(cfg.hooks, "after", defaults=False, skip=False, dry_run=True, log=info, ask=input)
+        if not ns.skip_connectors:
+            try:
+                head = gitops.current_repo().sha
+            except gitops.GitError:
+                head = "HEAD"
+            _post_push(cwd, cfg, release_ver, head, ns, dry_run=True)
         info("no files written")
         return
 
@@ -276,6 +288,24 @@ def main(argv: list[str] | None = None) -> None:
             f"left project at {snapshot_ver} (already released). "
             f"next `release -rc` starts {nxt.major}.{nxt.minor + 1}.0-rc0"
         )
+
+    # Past the atomic push: nothing below may reset, delete, or move a tag.
+    if ns.skip_connectors:
+        info("connectors skipped (--skip-connectors)")
+        return
+    if not _post_push(cwd, cfg, release_ver, gitops.tag_commit(release_ver), ns, dry_run=False):
+        fail(f"release {release_ver} is pushed and its tags stay; a connector did not finish (see above to resume)")
+
+
+def _post_push(cwd: Path, cfg: Config, release_ver: str, sha: str, ns: argparse.Namespace, *, dry_run: bool) -> bool:
+    try:
+        return commands.post_push(cwd, cfg, release_ver, sha, defaults=ns.defaults, dry_run=dry_run)
+    except (ChainInterrupted, KeyboardInterrupt):
+        info(f"interrupted. the tags stay pushed. see: release connectors status {release_ver}")
+        raise SystemExit(130)
+    except (ConnectorError, ConfigError) as exc:
+        fail(f"{exc} (release {release_ver} tags are not touched)")
+        return False
 
 
 def _preview_write(adapter, cwd: Path, cfg: Config, version: str, artifact: str) -> dict[str, tuple[str, str]]:
