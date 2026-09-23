@@ -185,7 +185,7 @@ Settings: `release edit` then `global set cursor-review <key> <value>` for `dela
 A connector is a `release.connectors` entry point pointing at a zero-arg callable. release-cli runs it in a subprocess with the action (`questions` or `run`) as `argv[1]`, one JSON request on stdin, and expects one JSON object on stdout. Logs go to stderr and are shown live.
 
 - Request: `protocol`, `action`, `connector`, `repo`, `remote_url`, `repo_root`, `artifact`, `release_version`, `tags`, `sha`, `mode` (`rc`/`fv`), `dry_run`, `prior` (`{name: {status, result, error, job_id}}`), `config`, `resume_job_id`; `run` adds `answers`.
-- `questions` → `{"protocol": 1, "questions": [...], "applies": true, "timeout_seconds": 1860}`. Question types `bool`, `choice`, `text`, `int`, with `default`, `default_when`, `when`, `persist`, `pattern` (text), `min`/`max` (int). 30 s timeout.
+- `questions` → `{"protocol": 1, "questions": [...], "applies": true, "timeout_seconds": 1860}`. Not for this project: `"applies": false, "reason": "..."` (skipped, exit 0). A prerequisite in `prior` failed (e.g. no `SUCCESS` build): `"applies": false, "blocked": true, "reason": "..."` (recorded `failed` with that reason, exit 1). Question types `bool`, `choice`, `text`, `int`, with `default`, `default_when`, `when`, `persist`, `pattern` (text), `min`/`max` (int). 30 s timeout.
 - `run` → `{"protocol": 1, "ok": true, "result": {...}}`, optionally `status` (`interrupted`), `error`, `job_id`.
 - Any other `protocol`, invalid JSON, missing fields, or a non-zero exit from `run` marks the connector `failed` with the reason. On timeout or Ctrl-C the CLI sends SIGINT and waits 10 s for an `interrupted` answer carrying the `job_id`.
 
