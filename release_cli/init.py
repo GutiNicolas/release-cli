@@ -5,7 +5,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-from release_cli import adapters
+from release_cli import adapters, prompts
 from release_cli.adapters.base import AdapterError
 from release_cli.config import (
     LOCAL_NAME,
@@ -37,25 +37,13 @@ class Prompter:
 
 class StdPrompter(Prompter):
     def confirm(self, question: str, default: bool) -> bool:
-        suffix = "Y/n" if default else "y/N"
-        raw = input(f"{question} ({suffix}): ").strip().lower()
-        if raw == "":
-            return default
-        return raw.startswith("y")
+        return prompts.ask_bool(question, default)
 
     def ask(self, question: str, default: str = "") -> str:
-        hint = f" [{default}]" if default else ""
-        raw = input(f"{question}{hint}: ")
-        if raw.strip() == "" and default:
-            return default
-        return raw.strip()
+        return prompts.ask_text(question, default or None, required=False)
 
     def choose(self, question: str, options: list[str]) -> str:
-        listed = ", ".join(options)
-        while True:
-            raw = self.ask(f"{question} ({listed})", options[0])
-            if raw in options:
-                return raw
+        return prompts.ask_choice(question, options, options[0])
 
 
 class AutoPrompter(Prompter):
@@ -137,7 +125,7 @@ def initialize(
     tool: str | None = None,
     force: bool = False,
     prompter: Prompter | None = None,
-    yes: bool = False,
+    defaults: bool = False,
     log=print,
 ) -> tuple[Config, bool]:
     """Returns (config, dirtied_git) where dirtied_git means gitignore/toml changed."""
@@ -145,7 +133,7 @@ def initialize(
     if existing is not None and not force:
         raise InitError(f"already initialized ({LOCAL_NAME} or {TEAM_NAME} present). use --init --force")
     if prompter is None:
-        prompter = AutoPrompter() if yes or not sys.stdin.isatty() else StdPrompter()
+        prompter = AutoPrompter() if defaults or not sys.stdin.isatty() else StdPrompter()
 
     found = detect(cwd)
     if tool:
