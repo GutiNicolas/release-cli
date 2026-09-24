@@ -44,4 +44,10 @@ fi
 
 printf '%s\n' "Installed: $bin"
 "$bin" -h >/dev/null
+
+# Writes ~/.config/release/source.toml (remote, branch, path of this clone) so `release update`
+# works from any directory. Asks cursor-review only if its key does not exist yet; keeps existing config.
+"$bin" update --after-install "$ROOT"
+printf '%s\n' "Update later from anywhere: release update"
+printf '%s\n' "Hooks and connectors: release edit"
 printf '%s\n' "Try: release --help"
