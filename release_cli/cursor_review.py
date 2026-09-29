@@ -35,6 +35,7 @@ DEFAULTS: dict[str, Any] = {
 }
 STALE_UNCLAIMED = 60.0
 TICK = 60.0
+FOCUS_SETTLE = 0.8
 DEEPLINK_LIMIT = 10000
 DEEPLINK_BASE = "cursor://anysphere.cursor-deeplink/prompt"
 
@@ -245,13 +246,26 @@ def deeplink_text(job: dict[str, Any]) -> str:
     return f"A release was just deployed. Read the review brief at {brief} and follow it. Do not change code.\n"
 
 
+def repo_abs(job: dict[str, Any]) -> str:
+    """Absolute local workspace of the repo being reviewed (git toplevel from the release run)."""
+    return str(Path(job["cwd"]).expanduser().resolve())
+
+
 def focus_repo_command(job: dict[str, Any]) -> list[str] | None:
-    """Focus the existing Cursor window for this repo (or open that folder). No --reuse-window: that hijacks another project."""
+    """Pin the already-open editor window for this folder. --classic avoids the Agents/clone UI; no --reuse-window/--new-window."""
+    folder = repo_abs(job)
     binary = shutil.which(str(job.get("cursor_bin") or "cursor"))
     if binary:
-        return [binary, job["cwd"]]
+        return [binary, "--classic", folder]
     if _platform() == "darwin" and shutil.which("open"):
-        return ["open", "-a", "Cursor", job["cwd"]]
+        return ["open", "-a", "Cursor", folder]
+    return None
+
+
+def raise_cursor_command() -> list[str] | None:
+    """Bring Cursor.app to the front so the window we just pinned is the deeplink target (macOS)."""
+    if _platform() == "darwin" and shutil.which("osascript"):
+        return ["osascript", "-e", 'tell application "Cursor" to activate']
     return None
 
 
@@ -274,7 +288,7 @@ def app_open_command(job: dict[str, Any]) -> list[str] | None:
     return deeplink_open_command(prompt_deeplink(deeplink_text(job)))
 
 
-def _handoff(job: dict[str, Any], run: Callable[..., Any]) -> tuple[str, int]:
+def _handoff(job: dict[str, Any], run: Callable[..., Any], sleep: Callable[[float], None] = time.sleep) -> tuple[str, int]:
     if job.get("cloud"):
         cmd = [*job["cloud_command"], job["prompt"]]
         try:
@@ -284,15 +298,29 @@ def _handoff(job: dict[str, Any], run: Callable[..., Any]) -> tuple[str, int]:
         return (proc.stdout or "") + (proc.stderr or ""), proc.returncode
 
     notes: list[str] = []
+    folder = repo_abs(job)
     focus = focus_repo_command(job)
-    if focus:
+    if focus is None:
+        notes.append("could not focus Cursor window: no cursor on PATH")
+        return "\n".join(notes) + "\n", 127
+    try:
+        proc = run(focus, cwd=folder, capture_output=True, text=True, check=False)
+    except OSError as exc:
+        notes.append(f"could not focus Cursor window ({focus[0]}): {exc}")
+        return "\n".join(notes) + "\n", 127
+    extra = ((proc.stdout or "") + (proc.stderr or "")).strip()
+    if extra:
+        notes.append(extra)
+    if proc.returncode != 0:
+        notes.append(f"could not pin Cursor window for {folder} (exit {proc.returncode})")
+        return "\n".join(notes) + "\n", proc.returncode
+    raise_cmd = raise_cursor_command()
+    if raise_cmd:
         try:
-            proc = run(focus, cwd=job["cwd"], capture_output=True, text=True, check=False)
-            extra = ((proc.stdout or "") + (proc.stderr or "")).strip()
-            if extra:
-                notes.append(extra)
-        except OSError as exc:
-            notes.append(f"could not focus Cursor window ({focus[0]}): {exc}")
+            run(raise_cmd, cwd=folder, capture_output=True, text=True, check=False)
+        except OSError:
+            pass
+    sleep(FOCUS_SETTLE)
 
     text = deeplink_text(job)
     opener = deeplink_open_command(prompt_deeplink(text))
@@ -300,7 +328,7 @@ def _handoff(job: dict[str, Any], run: Callable[..., Any]) -> tuple[str, int]:
         notes.append("could not open Cursor chat: no open/xdg-open on PATH")
         return "\n".join(notes) + "\n", 127
     try:
-        proc = run(opener, cwd=job["cwd"], capture_output=True, text=True, check=False)
+        proc = run(opener, cwd=folder, capture_output=True, text=True, check=False)
     except OSError as exc:
         notes.append(f"could not start {opener[0]}: {exc}")
         return "\n".join(notes) + "\n", 127
@@ -335,7 +363,7 @@ def work(
         return "replaced"
     job = {**current, "status": "running", "started_at": _iso(now())}
     write_job(path, job)
-    output, code = _handoff(job, run)
+    output, code = _handoff(job, run, sleep)
     Path(job["output"]).write_text(output, encoding="utf-8")
     job = {**job, "status": "done" if code == 0 else "failed", "exit_code": code, "finished_at": _iso(now())}
     write_job(path, job)
@@ -376,7 +404,7 @@ def run(req: dict[str, Any], *, now: Callable[[], float] = time.time, spawn: Cal
             "target_epoch": target,
             "target_at": _iso(target),
             "prompt": build_prompt(req, result, succeeded, delay, answers.get("extra_prompt") or ""),
-            "cwd": req["repo_root"],
+            "cwd": str(Path(req["repo_root"]).expanduser().resolve()),
             "notify": _truthy(cfg["notify"]),
             "cloud": cloud,
             "cloud_command": list(cfg["cloud_command"]),
