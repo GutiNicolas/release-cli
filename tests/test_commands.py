@@ -13,7 +13,7 @@ from tests.conftest import write_config
 def test_register_asks_order_and_break_on_error_and_never_reorders() -> None:
     g = {"order": ["cursor-review"], "connectors": {"cursor-review": {"builtin": True}}}
     replies = iter(["1", "", "", "9", "2", "n", "y"])
-    base = {"source": "https://github.com/koinlatam/fraud-platform-api-py-connector", "sha": "a" * 40}
+    base = {"source": "https://github.com/example/release-connector", "sha": "a" * 40}
     added = commands.register(g, ["platform-build", "platform-deploy"], base, break_default=True, defaults=False, ask=lambda _p: next(replies))
     assert added == ["platform-build", "platform-deploy"]
     assert g["order"] == ["platform-build", "platform-deploy", "cursor-review"]
@@ -36,8 +36,8 @@ def test_register_refuses_same_name_from_another_source() -> None:
 @pytest.mark.parametrize(
     ("target", "url", "ref"),
     [
-        ("https://github.com/koinlatam/fraud-platform-api-py-connector", "https://github.com/koinlatam/fraud-platform-api-py-connector", ""),
-        ("https://github.com/koinlatam/fraud-platform-api-py-connector.git@v0.1.0", "https://github.com/koinlatam/fraud-platform-api-py-connector", "v0.1.0"),
+        ("https://github.com/example/release-connector", "https://github.com/example/release-connector", ""),
+        ("https://github.com/example/release-connector.git@v0.1.0", "https://github.com/example/release-connector", "v0.1.0"),
     ],
 )
 def test_split_target(target: str, url: str, ref: str) -> None:
@@ -46,7 +46,7 @@ def test_split_target(target: str, url: str, ref: str) -> None:
 
 def test_split_target_rejects_non_https() -> None:
     with pytest.raises(connectors.ConnectorError):
-        commands.split_target("git@github.com:koinlatam/x.git")
+        commands.split_target("git@github.com:example/x.git")
 
 
 def test_add_builtin_cursor_review_defaults(capsys: pytest.CaptureFixture[str]) -> None:
@@ -84,13 +84,13 @@ def test_hook_url_cannot_go_to_team_file(tmp_path: Path) -> None:
 def test_edit_config_share_and_origins(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     write_config(tmp_path)
     commands.connector_add("cursor-review", defaults=True)
-    commands.edit(tmp_path, ["config", "set", "cursor-review", "extra_prompt", "Use", "the", "Datadog", "MCP"])
+    commands.edit(tmp_path, ["config", "set", "cursor-review", "extra_prompt", "Use", "the", "logs", "MCP"])
     commands.edit(tmp_path, ["config", "share", "cursor-review", "extra_prompt"])
-    assert "Datadog" in (tmp_path / "release.toml").read_text(encoding="utf-8")
+    assert "logs MCP" in (tmp_path / "release.toml").read_text(encoding="utf-8")
     commands.edit(tmp_path, ["global", "set", "cursor-review", "notify", "true"])
     commands.edit(tmp_path, ["show"])
     out = capsys.readouterr().out
-    assert 'extra_prompt = "Use the Datadog MCP" (.release)' in out
+    assert 'extra_prompt = "Use the logs MCP" (.release)' in out
     assert "delay_minutes = 10 (connectors.toml)" in out
     assert "notify = true (~/.config/release/release.toml)" in out
     assert "notify" not in connectors.global_path().read_text(encoding="utf-8")
@@ -112,7 +112,7 @@ def test_edit_interactive_loop(tmp_path: Path, capsys: pytest.CaptureFixture[str
 
 
 def test_release_version_of_accepts_both_tag_forms() -> None:
-    assert commands.release_version_of("fraud-juggler-1.5.0-rc0", "fraud-juggler") == "1.5.0-rc0"
-    assert commands.release_version_of("1.5.0", "fraud-juggler") == "1.5.0"
+    assert commands.release_version_of("example-app-1.5.0-rc0", "example-app") == "1.5.0-rc0"
+    assert commands.release_version_of("1.5.0", "example-app") == "1.5.0"
     with pytest.raises(connectors.ConnectorError):
-        commands.release_version_of("banana", "fraud-juggler")
+        commands.release_version_of("banana", "example-app")
