@@ -85,10 +85,21 @@ class Clock:
         self.t += seconds
 
 
+def _osascript(root: Path) -> tuple[list[list[str]], list[list[str]]]:
+    notes, activates = [], []
+    for argv in recorded(root, "osascript"):
+        joined = " ".join(argv)
+        if "display notification" in joined:
+            notes.append(argv)
+        elif "activate" in joined:
+            activates.append(argv)
+    return notes, activates
+
+
 def _assert_app_open(root: Path, opener: str) -> str:
     assert recorded(root, "agent") == [] and recorded(root, "cursor-agent") == []
     [focus] = recorded(root, "cursor")
-    assert focus == [str(root)]
+    assert focus == ["--classic", str(root.resolve())]
     [argv] = recorded(root, opener)
     if opener == "open":
         assert argv[0] == "-u"
@@ -104,21 +115,22 @@ def test_timer_is_ten_minutes_after_deploy_success(fake_bin: Path) -> None:
     assert job["target_epoch"] == SUCCESS_EPOCH + 600
     clock = Clock(SUCCESS_EPOCH + 30)
     assert cr.work(path, now=clock.now, sleep=clock.sleep) == "done"
-    assert sum(clock.sleeps) == pytest.approx(570)
+    assert sum(clock.sleeps) == pytest.approx(570 + cr.FOCUS_SETTLE)
     assert max(clock.sleeps) <= cr.TICK
     _assert_app_open(fake_bin, "open")
     out = Path(job["output"]).read_text(encoding="utf-8")
     assert "opened Cursor chat" in out
     for needle in NEEDLES:
         assert needle in out
-    assert len(recorded(fake_bin, "osascript")) == 1
+    notes, activates = _osascript(fake_bin)
+    assert len(notes) == 1 and len(activates) == 1
 
 
 def test_target_already_passed_on_wake_runs_immediately(fake_bin: Path) -> None:
     path = scheduled(fake_bin)
     clock = Clock(SUCCESS_EPOCH + 3 * 3600)
     assert cr.work(path, now=clock.now, sleep=clock.sleep) == "done"
-    assert clock.sleeps == []
+    assert clock.sleeps == [cr.FOCUS_SETTLE]
     _assert_app_open(fake_bin, "open")
 
 
@@ -133,7 +145,9 @@ def test_notification_off_never_notifies(fake_bin: Path, monkeypatch: pytest.Mon
     monkeypatch.setattr(cr, "_platform", lambda: platform)
     assert _review(fake_bin, notify=False) == "done"
     _assert_app_open(fake_bin, "open" if platform == "darwin" else "xdg-open")
-    assert recorded(fake_bin, "osascript") == [] and recorded(fake_bin, "notify-send") == []
+    notes, activates = _osascript(fake_bin)
+    assert notes == [] and recorded(fake_bin, "notify-send") == []
+    assert len(activates) == (1 if platform == "darwin" else 0)
 
 
 @pytest.mark.parametrize(
@@ -153,8 +167,10 @@ def test_notification_per_platform(fake_bin: Path, monkeypatch: pytest.MonkeyPat
         (fake_bin / "bin" / remove).unlink()
     assert _review(fake_bin) == "done"
     _assert_app_open(fake_bin, "open" if platform == "darwin" else "xdg-open")
-    for tool in ("osascript", "notify-send"):
-        assert len(recorded(fake_bin, tool)) == (1 if tool == expect else 0)
+    notes, activates = _osascript(fake_bin)
+    assert len(notes) == (1 if expect == "osascript" else 0)
+    assert len(activates) == (1 if platform == "darwin" and remove != "osascript" else 0)
+    assert len(recorded(fake_bin, "notify-send")) == (1 if expect == "notify-send" else 0)
     if expect == "notify-send":
         [argv] = recorded(fake_bin, "notify-send")
         assert argv[0] == "release cursor-review" and "example-app 1.0.0: review opened in Cursor" in argv[1]
@@ -221,6 +237,30 @@ def test_replaced_worker_exits_without_opening_the_app(fake_bin: Path) -> None:
     assert cr.work(path, now=clock.now, sleep=sleep) == "replaced"
     assert recorded(fake_bin, "cursor") == []
     assert recorded(fake_bin, "open") == []
+    assert recorded(fake_bin, "agent") == []
+
+
+def test_job_stores_absolute_repo_path(fake_bin: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.chdir(fake_bin)
+    req = request(fake_bin)
+    req["repo_root"] = "."
+    resp = cr.run(req, spawn=lambda _p: 4242)
+    assert resp["ok"]
+    job = cr.read_job(cr.job_path("example-app", "1.0.0"))
+    assert Path(job["cwd"]) == fake_bin.resolve()
+    clock = Clock(SUCCESS_EPOCH + 601)
+    assert cr.work(cr.job_path("example-app", "1.0.0"), now=clock.now, sleep=clock.sleep) == "done"
+    _assert_app_open(fake_bin, "open")
+
+
+def test_failed_focus_does_not_fire_the_deeplink(fake_bin: Path) -> None:
+    (fake_bin / "bin" / "cursor").write_text(
+        f"#!{sys.executable}\nimport sys\nsys.exit(2)\n",
+        encoding="utf-8",
+    )
+    assert _review(fake_bin) == "failed"
+    assert recorded(fake_bin, "open") == []
+    assert recorded(fake_bin, "xdg-open") == []
     assert recorded(fake_bin, "agent") == []
 
 
