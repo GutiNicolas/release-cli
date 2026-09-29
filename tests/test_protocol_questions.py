@@ -54,7 +54,7 @@ def _collect(tmp_path: Path, replies: list[str], *, defaults: bool = False, item
     [("prd", "SAFE_DEPLOY"), ("ops", "SAFE_DEPLOY"), ("qa", "ROLLING_UPDATE"), ("dynamic", "ROLLING_UPDATE")],
 )
 def test_default_when_picks_deploy_type_by_environment(tmp_path: Path, environment: str, expected: str) -> None:
-    replies = [environment, ""] + (["FRAUD"] if environment in ("prd", "ops") else [])
+    replies = [environment, ""] + (["DEMO"] if environment in ("prd", "ops") else [])
     answers, asked = _collect(tmp_path, replies)
     assert answers["deploy_type"] == expected
     assert f"[{expected}]" in asked[1]
@@ -62,7 +62,7 @@ def test_default_when_picks_deploy_type_by_environment(tmp_path: Path, environme
 
 
 def test_reason_asked_only_for_prod_without_safe_deploy(tmp_path: Path) -> None:
-    answers, asked = _collect(tmp_path, ["prd", "ROLLING_UPDATE", "", "hotfix, canary not needed", "FRAUD"])
+    answers, asked = _collect(tmp_path, ["prd", "ROLLING_UPDATE", "", "hotfix, canary not needed", "DEMO"])
     assert answers["skip_safe_deploy_reason"] == "hotfix, canary not needed"
     assert len(asked) == 5
     qa, _ = _collect(tmp_path, ["qa", "ROLLING_UPDATE"])
@@ -77,11 +77,11 @@ def test_defaults_uses_default_when(tmp_path: Path) -> None:
 
 
 def test_pattern_reasks_and_persists_valid_value(tmp_path: Path) -> None:
-    answers, asked = _collect(tmp_path, ["prd", "", "fraud", "FRAUD"])
-    assert answers["jira_project_key"] == "FRAUD"
+    answers, asked = _collect(tmp_path, ["prd", "", "demo", "DEMO"])
+    assert answers["jira_project_key"] == "DEMO"
     assert len(asked) == 4
     cfg = load(tmp_path)
-    assert cfg is not None and cfg.connectors["platform-deploy"]["jira_project_key"] == "FRAUD"
+    assert cfg is not None and cfg.connectors["platform-deploy"]["jira_project_key"] == "DEMO"
 
 
 def test_invalid_stored_value_reasked_and_fails_under_defaults(tmp_path: Path) -> None:

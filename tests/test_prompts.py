@@ -34,8 +34,8 @@ def test_choice_reasks_until_option() -> None:
 
 
 def test_text_required_reasks_empty() -> None:
-    ask, asked = _answers("", "  FRAUD ")
-    assert prompts.ask_text("Jira key", ask=ask) == "FRAUD"
+    ask, asked = _answers("", "  DEMO ")
+    assert prompts.ask_text("Jira key", ask=ask) == "DEMO"
     assert len(asked) == 2
 
 
@@ -51,7 +51,7 @@ def test_toml_writer_round_trips() -> None:
     data = {
         "tool": "maven",
         "hooks": [{"when": "before", "cmd": 'say "hi"', "default": False}],
-        "connectors": {"order": ["b", "a"], "platform-deploy": {"jira_project_key": "FRAUD", "n": 3}},
+        "connectors": {"order": ["b", "a"], "platform-deploy": {"jira_project_key": "DEMO", "n": 3}},
         "empty": [],
     }
     assert loads_toml(dump_toml(data)) == data
@@ -63,10 +63,10 @@ def test_set_connector_value_keeps_hooks_and_team_layer(tmp_path: Path) -> None:
         'tool = "maven"\nartifact = "x"\nversion_file = "pom.xml"\n[connectors.platform-build]\nversion_tag = "plain"\n',
         encoding="utf-8",
     )
-    set_connector_value(tmp_path, "platform-deploy", "jira_project_key", "FRAUD")
+    set_connector_value(tmp_path, "platform-deploy", "jira_project_key", "DEMO")
     cfg = load(tmp_path)
     assert cfg is not None
     assert cfg.hooks[0].cmd == "mvn test"
-    assert cfg.connectors["platform-deploy"] == {"jira_project_key": "FRAUD"}
+    assert cfg.connectors["platform-deploy"] == {"jira_project_key": "DEMO"}
     assert cfg.connectors["platform-build"] == {"version_tag": "plain"}
-    assert parse((tmp_path / ".release").read_text(encoding="utf-8")).artifact == "fraud-juggler"
+    assert parse((tmp_path / ".release").read_text(encoding="utf-8")).artifact == "example-app"

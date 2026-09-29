@@ -16,7 +16,7 @@ def _isolated_home(tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest
     return home
 
 
-def write_config(tmp_path: Path, *, tool: str = "maven", artifact: str = "fraud-juggler", version_file: str = "pom.xml", hooks: str = "hooks = []") -> None:
+def write_config(tmp_path: Path, *, tool: str = "maven", artifact: str = "example-app", version_file: str = "pom.xml", hooks: str = "hooks = []") -> None:
     extra = hooks if hooks.startswith("hooks") or hooks.startswith("[[") else f"hooks = {hooks}"
     (tmp_path / ".release").write_text(
         dumps(parse(f'tool = "{tool}"\nartifact = "{artifact}"\nversion_file = "{version_file}"\n{extra}\n')),
