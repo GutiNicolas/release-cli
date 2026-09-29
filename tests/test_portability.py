@@ -21,7 +21,10 @@ def test_darwin_only_markers_only_in_guarded_notification() -> None:
         for num, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
             if DARWIN_ONLY.search(line):
                 hits.append(f"{path.relative_to(ROOT)}:{num}")
-    guarded = {f"release_cli/cursor_review.py:{n}" for n in _lines_of(cr.notification_command) | _lines_of_docstring()}
+    guarded = {
+        f"release_cli/cursor_review.py:{n}"
+        for n in _lines_of(cr.notification_command) | _lines_of(cr.deeplink_open_command) | _lines_of(cr.focus_repo_command) | _lines_of_docstring()
+    }
     assert set(hits) <= guarded, f"Darwin-only call outside notification_command: {sorted(set(hits) - guarded)}"
 
 

@@ -1,8 +1,9 @@
-"""Built-in connector `cursor-review`: a local Cursor `agent` looks at the deploy N minutes after SUCCESS.
+"""Built-in connector `cursor-review`: open a chat in the Cursor app N minutes after SUCCESS.
 
 The release does not wait. `run` leaves a detached job (one per repo + tag) that sleeps
-until a wall-clock target, calls `agent` in ask mode, and posts a desktop notification
-(osascript on macOS, notify-send on Linux when present).
+until a wall-clock target, hands the prompt to the already-running Cursor app (never
+`agent` / `cursor-agent`), and posts a desktop notification (osascript on macOS,
+notify-send on Linux when present).
 
     python -m release_cli.cursor_review questions|run   (protocol 1 on stdin/stdout)
     python -m release_cli.cursor_review worker <job.json>
@@ -20,6 +21,7 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
+from urllib.parse import urlencode
 
 from release_cli.connectors import data_dir, load_release_toml
 
@@ -28,11 +30,13 @@ DEFAULTS: dict[str, Any] = {
     "notify": False,
     "slack_cloud": False,
     "cloud_command": [],
-    "agent_bin": "agent",
+    "cursor_bin": "cursor",
     "deploy_connector": "platform-deploy",
 }
 STALE_UNCLAIMED = 60.0
 TICK = 60.0
+DEEPLINK_LIMIT = 10000
+DEEPLINK_BASE = "cursor://anysphere.cursor-deeplink/prompt"
 
 BASE_PROMPT = """\
 A release was just deployed. Look for errors caused by it and report what you find. Do not change code.
@@ -226,10 +230,87 @@ def _notify(title: str, message: str, run: Callable[..., Any]) -> None:
         pass  # a missing desktop session must not fail the review
 
 
-def agent_command(job: dict[str, Any]) -> list[str]:
+def prompt_deeplink(text: str) -> str:
+    """Documented Cursor app chat prefill: cursor://anysphere.cursor-deeplink/prompt?text=…"""
+    return f"{DEEPLINK_BASE}?{urlencode({'text': text})}"
+
+
+def deeplink_text(job: dict[str, Any]) -> str:
+    """Full prompt, or a short pointer if the encoded deeplink would exceed the 10k limit."""
+    prompt = job["prompt"]
+    if len(prompt_deeplink(prompt)) <= DEEPLINK_LIMIT:
+        return prompt
+    brief = Path(job["output"]).with_suffix(".prompt")
+    brief.write_text(prompt, encoding="utf-8")
+    return f"A release was just deployed. Read the review brief at {brief} and follow it. Do not change code.\n"
+
+
+def focus_repo_command(job: dict[str, Any]) -> list[str] | None:
+    """Focus the existing Cursor window for this repo (or open that folder). No --reuse-window: that hijacks another project."""
+    binary = shutil.which(str(job.get("cursor_bin") or "cursor"))
+    if binary:
+        return [binary, job["cwd"]]
+    if _platform() == "darwin" and shutil.which("open"):
+        return ["open", "-a", "Cursor", job["cwd"]]
+    return None
+
+
+def deeplink_open_command(url: str) -> list[str] | None:
+    """Hand the prompt URL to the already-running Cursor app (`open -u` on macOS, xdg-open on Linux)."""
+    platform = _platform()
+    if platform == "darwin" and shutil.which("open"):
+        return ["open", "-u", url]
+    if platform.startswith("linux") and shutil.which("xdg-open"):
+        return ["xdg-open", url]
+    if shutil.which("xdg-open"):
+        return ["xdg-open", url]
+    if shutil.which("open"):
+        return ["open", "-u", url]
+    return None
+
+
+def app_open_command(job: dict[str, Any]) -> list[str] | None:
+    """The command that opens a prefilled Agent chat in the Cursor app. Never `agent` / `cursor-agent`."""
+    return deeplink_open_command(prompt_deeplink(deeplink_text(job)))
+
+
+def _handoff(job: dict[str, Any], run: Callable[..., Any]) -> tuple[str, int]:
     if job.get("cloud"):
-        return [*job["cloud_command"], job["prompt"]]
-    return [job["agent_bin"], "-p", "--mode", "ask", "--trust", "--workspace", job["cwd"], "--output-format", "text", job["prompt"]]
+        cmd = [*job["cloud_command"], job["prompt"]]
+        try:
+            proc = run(cmd, cwd=job["cwd"], capture_output=True, text=True, check=False)
+        except OSError as exc:
+            return f"could not start {cmd[0]}: {exc}\n", 127
+        return (proc.stdout or "") + (proc.stderr or ""), proc.returncode
+
+    notes: list[str] = []
+    focus = focus_repo_command(job)
+    if focus:
+        try:
+            proc = run(focus, cwd=job["cwd"], capture_output=True, text=True, check=False)
+            extra = ((proc.stdout or "") + (proc.stderr or "")).strip()
+            if extra:
+                notes.append(extra)
+        except OSError as exc:
+            notes.append(f"could not focus Cursor window ({focus[0]}): {exc}")
+
+    text = deeplink_text(job)
+    opener = deeplink_open_command(prompt_deeplink(text))
+    if opener is None:
+        notes.append("could not open Cursor chat: no open/xdg-open on PATH")
+        return "\n".join(notes) + "\n", 127
+    try:
+        proc = run(opener, cwd=job["cwd"], capture_output=True, text=True, check=False)
+    except OSError as exc:
+        notes.append(f"could not start {opener[0]}: {exc}")
+        return "\n".join(notes) + "\n", 127
+    extra = ((proc.stdout or "") + (proc.stderr or "")).strip()
+    if extra:
+        notes.append(extra)
+    if proc.returncode == 0:
+        notes.append("opened Cursor chat")
+        notes.append(text.rstrip())
+    return "\n".join(notes) + "\n", proc.returncode
 
 
 def work(
@@ -239,7 +320,7 @@ def work(
     sleep: Callable[[float], None] = time.sleep,
     run: Callable[..., Any] = subprocess.run,
 ) -> str:
-    """Wait for the wall-clock target, then review. Returns the final job status."""
+    """Wait for the wall-clock target, then open the chat in the Cursor app. Returns the final job status."""
     job = read_job(path)
     if job is None:
         return "missing"
@@ -254,16 +335,12 @@ def work(
         return "replaced"
     job = {**current, "status": "running", "started_at": _iso(now())}
     write_job(path, job)
-    try:
-        proc = run(agent_command(job), cwd=job["cwd"], capture_output=True, text=True, check=False)
-        output, code = (proc.stdout or "") + (proc.stderr or ""), proc.returncode
-    except OSError as exc:
-        output, code = f"could not start {agent_command(job)[0]}: {exc}\n", 127
+    output, code = _handoff(job, run)
     Path(job["output"]).write_text(output, encoding="utf-8")
     job = {**job, "status": "done" if code == 0 else "failed", "exit_code": code, "finished_at": _iso(now())}
     write_job(path, job)
     if job.get("notify"):
-        verdict = "finished" if code == 0 else f"failed ({code})"
+        verdict = "opened in Cursor" if code == 0 else f"failed ({code})"
         _notify("release cursor-review", f"{job['repo']} {job['tag']}: review {verdict}. {job['output']}", run)
     return job["status"]
 
@@ -303,7 +380,7 @@ def run(req: dict[str, Any], *, now: Callable[[], float] = time.time, spawn: Cal
             "notify": _truthy(cfg["notify"]),
             "cloud": cloud,
             "cloud_command": list(cfg["cloud_command"]),
-            "agent_bin": cfg["agent_bin"],
+            "cursor_bin": cfg["cursor_bin"],
         },
         spawn=spawn,
     )
