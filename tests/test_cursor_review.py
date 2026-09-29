@@ -15,7 +15,7 @@ from release_cli import cursor_review as cr
 
 SUCCESS_AT = "2026-09-23T19:40:00Z"
 SUCCESS_EPOCH = 1790192400.0
-NEEDLES = ("fraud-juggler", "1.5.0", "prd", "SAFE_DEPLOY", "dep-7", "2026-09-23T19:40:00Z", "Use the Datadog MCP.")
+NEEDLES = ("example-app", "1.0.0", "qa", "ROLLING_UPDATE", "job-99", "2026-09-23T19:40:00Z", "Use the logs MCP.")
 
 
 @pytest.fixture()
@@ -47,20 +47,20 @@ def prompt_from_open(argv: list[str]) -> str:
     return parse_qs(urlparse(url).query)["text"][0]
 
 
-def request(tmp_path: Path, *, extra: str = "Use the Datadog MCP.", deploy_status: str = "SUCCESS", notify: bool = True) -> dict:
+def request(tmp_path: Path, *, extra: str = "Use the logs MCP.", deploy_status: str = "SUCCESS", notify: bool = True) -> dict:
     return {
         "protocol": 1,
         "action": "run",
         "connector": "cursor-review",
-        "repo": "fraud-juggler",
+        "repo": "example-app",
         "repo_root": str(tmp_path),
-        "release_version": "1.5.0",
+        "release_version": "1.0.0",
         "answers": {"review": True, "extra_prompt": extra},
         "config": {"notify": notify, "slack_cloud": False},
         "prior": {
             "platform-deploy": {
                 "status": "ok" if deploy_status == "SUCCESS" else "failed",
-                "result": {"job_id": "dep-7", "status": deploy_status, "environment": "prd", "deploy_type": "SAFE_DEPLOY", "succeeded_at": SUCCESS_AT},
+                "result": {"job_id": "job-99", "status": deploy_status, "environment": "qa", "deploy_type": "ROLLING_UPDATE", "succeeded_at": SUCCESS_AT},
             }
         },
     }
@@ -69,7 +69,7 @@ def request(tmp_path: Path, *, extra: str = "Use the Datadog MCP.", deploy_statu
 def scheduled(tmp_path: Path, **kw) -> Path:
     resp = cr.run(request(tmp_path, **kw), spawn=lambda _p: 4242)
     assert resp["ok"] and resp["result"]["scheduled"] is True
-    return cr.job_path("fraud-juggler", "1.5.0")
+    return cr.job_path("example-app", "1.0.0")
 
 
 class Clock:
@@ -157,7 +157,7 @@ def test_notification_per_platform(fake_bin: Path, monkeypatch: pytest.MonkeyPat
         assert len(recorded(fake_bin, tool)) == (1 if tool == expect else 0)
     if expect == "notify-send":
         [argv] = recorded(fake_bin, "notify-send")
-        assert argv[0] == "release cursor-review" and "fraud-juggler 1.5.0: review opened in Cursor" in argv[1]
+        assert argv[0] == "release cursor-review" and "example-app 1.0.0: review opened in Cursor" in argv[1]
 
 
 def test_notification_failure_never_fails_the_review(fake_bin: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -229,7 +229,7 @@ def test_missing_app_open_command_fails(fake_bin: Path) -> None:
     (fake_bin / "bin" / "xdg-open").unlink()
     assert _review(fake_bin) == "failed"
     assert recorded(fake_bin, "agent") == []
-    assert cr.read_job(cr.job_path("fraud-juggler", "1.5.0"))["exit_code"] == 127
+    assert cr.read_job(cr.job_path("example-app", "1.0.0"))["exit_code"] == 127
 
 
 def test_long_prompt_uses_a_brief_file(fake_bin: Path) -> None:
@@ -248,13 +248,13 @@ def test_long_prompt_uses_a_brief_file(fake_bin: Path) -> None:
 def test_dead_pid_is_cleaned_but_finished_jobs_stay(fake_bin: Path) -> None:
     dead = subprocess.Popen([sys.executable, "-c", "pass"])
     dead.wait()
-    pending = cr.job_path("fraud-juggler", "1.4.0")
-    done = cr.job_path("fraud-juggler", "1.3.0")
+    pending = cr.job_path("example-app", "1.4.0")
+    done = cr.job_path("example-app", "1.3.0")
     cr.write_job(pending, {"status": "pending", "pid": dead.pid, "target_at": "x", "output": "x"})
     cr.write_job(done, {"status": "done", "pid": dead.pid, "target_at": "x", "output": "x"})
     assert cr.cleanup_dead() == [pending]
     assert not pending.exists() and done.exists()
-    assert [j["status"] for j in cr.list_jobs("fraud-juggler")] == ["done"]
+    assert [j["status"] for j in cr.list_jobs("example-app")] == ["done"]
 
 
 def test_protocol_questions_over_subprocess(tmp_path: Path) -> None:

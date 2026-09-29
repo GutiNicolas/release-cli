@@ -23,12 +23,12 @@ version = "1.4.0-SNAPSHOT"
 
 def test_gradle_properties_does_not_touch_other_1_4_0(tmp_path: Path) -> None:
     (tmp_path / "gradle.properties").write_text(PROPS, encoding="utf-8")
-    (tmp_path / "settings.gradle.kts").write_text('rootProject.name = "fraud-juggler"\n', encoding="utf-8")
+    (tmp_path / "settings.gradle.kts").write_text('rootProject.name = "example-app"\n', encoding="utf-8")
     adapter = GradleAdapter()
-    cfg = Config(tool="gradle", artifact="fraud-juggler", version_file="gradle.properties")
+    cfg = Config(tool="gradle", artifact="example-app", version_file="gradle.properties")
     state = adapter.read(tmp_path, cfg)
     assert state.version == "1.4.0-SNAPSHOT"
-    assert state.artifact == "fraud-juggler"
+    assert state.artifact == "example-app"
     adapter.write(tmp_path, cfg, "1.5.0-rc0")
     text = (tmp_path / "gradle.properties").read_text(encoding="utf-8")
     assert "version=1.5.0-rc0" in text

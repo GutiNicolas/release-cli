@@ -137,8 +137,8 @@ release edit                                                        # add, remov
 ### Install connectors
 
 ```sh
-release connector add https://github.com/koinlatam/fraud-platform-api-py-connector          # latest
-release connector add https://github.com/koinlatam/fraud-platform-api-py-connector@v0.1.0   # pinned
+release connector add https://github.com/example/release-connector          # latest
+release connector add https://github.com/example/release-connector@v0.1.0   # pinned
 release connector add cursor-review                                                         # built in
 release connector ls        # order, enabled, break_on_error, installed commit SHA
 release connector update platform-build     # explicit; a release never updates connectors
@@ -155,7 +155,7 @@ order = ["platform-build", "platform-deploy"]
 disabled = ["cursor-review"]
 
 [connectors.platform-deploy]
-jira_project_key = "FRAUD"
+jira_project_key = "DEMO"
 ```
 
 Values a connector asks once per project (for example `version_tag`, `jira_project_key`, the cursor-review extra prompt) are saved under `[connectors.<name>]` the first time you answer. `release edit` shows each value and where it comes from, changes it, and can copy it to `release.toml` (`config share`) to share it with the team.
@@ -185,7 +185,7 @@ The three typical cases:
 
 Optional, built in, off unless you enable it (`install.sh` asks once, default no). After a deploy reaches `SUCCESS` it schedules a local job (pid and state in `~/.local/share/release/jobs`) that runs 10 minutes after that time. The release does not wait, and closing the terminal does not kill the job. One job per repo and tag: a new one replaces the pending one. The target is wall-clock, so if the laptop slept past it, the review runs on wake. The job is a plain detached Python process (new session), the same on macOS and Linux.
 
-The job does not run the review itself. It focuses the existing Cursor window for that repo (`cursor <repo>` — no `--reuse-window`, so it does not steal another project) and opens a prefilled Agent chat in the already-running app via the documented deeplink `cursor://anysphere.cursor-deeplink/prompt?text=…` (`open -u` on macOS, `xdg-open` on Linux). You confirm the prompt in the app; that is where MCP plugins such as Datadog live. It never calls `agent` / `cursor-agent`. The prompt carries the repo, version, environment, deploy type, `job_id`, and the `SUCCESS` time, plus an extra per-project prompt you set the first time (e.g. which skills or MCPs such as Datadog to use). When the chat is opened you get a desktop notification (`notify`, on by default): `osascript` on macOS, `notify-send` on Linux if it is installed (e.g. `libnotify-bin`); without it the handoff still runs, just without a notification. Output goes to the job's `.out` file.
+The job does not run the review itself. It focuses the existing Cursor window for that repo (`cursor <repo>` — no `--reuse-window`, so it does not steal another project) and opens a prefilled Agent chat in the already-running app via the documented deeplink `cursor://anysphere.cursor-deeplink/prompt?text=…` (`open -u` on macOS, `xdg-open` on Linux). You confirm the prompt in the app; that is where MCP plugins live. It never calls `agent` / `cursor-agent`. The prompt carries the repo, version, environment, deploy type, `job_id`, and the `SUCCESS` time, plus an extra per-project prompt you set the first time (e.g. which skills or MCPs to use). When the chat is opened you get a desktop notification (`notify`, on by default): `osascript` on macOS, `notify-send` on Linux if it is installed (e.g. `libnotify-bin`); without it the handoff still runs, just without a notification. Output goes to the job's `.out` file.
 
 Settings: `release edit` then `global set cursor-review <key> <value>` for `delay_minutes`, `notify`, `cursor_bin`, `slack_cloud` (off), `cloud_command`. `slack_cloud` sends the review to a Cursor Cloud Agent instead, which is the only way to get the Slack DM; it runs in the cloud, so that agent needs the same integrations to see the errors, and `cloud_command` must be the command that starts it.
 

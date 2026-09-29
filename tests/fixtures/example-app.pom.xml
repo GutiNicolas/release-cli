@@ -6,19 +6,19 @@
 		<version>3.5.16</version>
 		<relativePath />
 	</parent>
-	<groupId>com.despegar.risk</groupId>
-	<artifactId>fraud-juggler</artifactId>
+	<groupId>com.example</groupId>
+	<artifactId>example-app</artifactId>
 	<version>1.4.0-SNAPSHOT</version>
-	<name>fraud-juggler</name>
+	<name>example-app</name>
 
 	<scm>
-		<connection>scm:git:git@github.com:koinlatam/fraud-juggler.git</connection>
-		<tag> fraud-juggler-1.2.0</tag>
+		<connection>scm:git:git@github.com:example/example-app.git</connection>
+		<tag> example-app-1.2.0</tag>
 	</scm>
 
 	<properties>
-		<service-commons.version>1.4.0</service-commons.version>
-		<risk-events-producer.version>1.4.0</risk-events-producer.version>
+		<commons-lib.version>1.4.0</commons-lib.version>
+		<events-lib.version>1.4.0</events-lib.version>
 	</properties>
 
 	<dependencies>

@@ -69,7 +69,7 @@ def questions(req: dict[str, Any]) -> dict[str, Any]:
             {
                 "id": "extra_prompt",
                 "type": "text",
-                "prompt": "Extra review prompt for this project (skills or MCPs to use, e.g. Datadog); empty for none",
+                "prompt": "Extra review prompt for this project (skills or MCPs to use, e.g. logs); empty for none",
                 "required": False,
                 "persist": "project",
                 "when": {"review": True},

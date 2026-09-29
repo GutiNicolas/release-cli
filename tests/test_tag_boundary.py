@@ -15,7 +15,7 @@ from release_cli.cli import main
 from tests.conftest import write_config
 from tests.test_connectors_contract import FAKE, POM, install_fakes, run_requests
 
-TAGS = ("1.5.0-rc0", "fraud-juggler-1.5.0-rc0")
+TAGS = ("1.5.0-rc0", "example-app-1.5.0-rc0")
 
 
 def git(cwd: Path, *args: str) -> str:
@@ -28,7 +28,7 @@ def repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     gitconfig.write_text("[user]\n\tname = Test\n\temail = test@example.com\n[init]\n\tdefaultBranch = main\n", encoding="utf-8")
     monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(gitconfig))
     monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
-    remote = tmp_path / "fraud-juggler.git"
+    remote = tmp_path / "example-app.git"
     work = tmp_path / "work"
     git(tmp_path, "init", "--bare", str(remote))
     git(tmp_path, "init", str(work))
@@ -86,7 +86,7 @@ def test_failing_connector_after_push_keeps_tags(repo: Path, monkeypatch: pytest
     err = capsys.readouterr()
     assert "tags stay" in err.err
     assert "release connectors run 1.5.0-rc0 --from platform-build" in err.out
-    state = connectors.load_state("fraud-juggler", "1.5.0-rc0")
+    state = connectors.load_state("example-app", "1.5.0-rc0")
     assert state is not None and state["connectors"]["platform-build"]["status"] == "failed"
     assert state["sha"] == git(repo, "rev-parse", "1.5.0-rc0^{commit}")
 
@@ -106,14 +106,14 @@ def test_resume_from_uses_saved_results(repo: Path) -> None:
     calls = run_requests(repo.parent)
     assert [c["connector"] for c in calls] == ["platform-build", "platform-deploy", "platform-deploy"]
     assert calls[-1]["prior"]["platform-build"]["result"]["by"] == "platform-build"
-    state = connectors.load_state("fraud-juggler", "1.5.0-rc0")
+    state = connectors.load_state("example-app", "1.5.0-rc0")
     assert state["connectors"]["platform-deploy"]["status"] == "ok"
 
 
 def test_only_runs_one_with_other_saved_results(repo: Path) -> None:
     install_fakes(("platform-build", "echo"), ("platform-deploy", "echo"), ("cursor-review", "echo"))
     main(["-rc", "--defaults"])
-    main(["connectors", "run", "fraud-juggler-1.5.0-rc0", "--only", "platform-build", "--defaults"])
+    main(["connectors", "run", "example-app-1.5.0-rc0", "--only", "platform-build", "--defaults"])
     calls = run_requests(repo.parent)
     assert [c["connector"] for c in calls][3:] == ["platform-build"]
     assert sorted(calls[-1]["prior"]) == ["cursor-review", "platform-deploy"]
@@ -125,13 +125,13 @@ def test_interrupted_job_is_repolled_not_relaunched(repo: Path, capsys: pytest.C
         main(["-rc", "--defaults"])
     out = capsys.readouterr().out
     assert "job_id: job-1" in out
-    state = connectors.load_state("fraud-juggler", "1.5.0-rc0")
+    state = connectors.load_state("example-app", "1.5.0-rc0")
     assert state["connectors"]["platform-build"] == {**state["connectors"]["platform-build"], "status": "interrupted", "job_id": "job-1"}
     main(["connectors", "run", "1.5.0-rc0", "--defaults"])
     calls = run_requests(repo.parent)
     assert calls[0]["resume_job_id"] is None
     assert calls[1]["resume_job_id"] == "job-1"
-    state = connectors.load_state("fraud-juggler", "1.5.0-rc0")
+    state = connectors.load_state("example-app", "1.5.0-rc0")
     assert state["connectors"]["platform-build"]["result"]["polled"] == "job-1"
     main(["connectors", "status", "1.5.0-rc0"])
     assert "platform-build: ok" in capsys.readouterr().out
@@ -164,7 +164,7 @@ def test_connectors_run_refuses_unpushed_tag(repo: Path, capsys: pytest.CaptureF
 def test_state_file_is_plain_json(repo: Path) -> None:
     install_fakes(("platform-build", "echo"))
     main(["-rc", "--defaults"])
-    path = connectors.state_path("fraud-juggler", "1.5.0-rc0")
+    path = connectors.state_path("example-app", "1.5.0-rc0")
     data = json.loads(path.read_text(encoding="utf-8"))
     assert data["tags"] == list(TAGS) and data["connectors"]["platform-build"]["status"] == "ok"
 
@@ -176,5 +176,5 @@ def test_log_lines_stay_in_order_with_connector_stderr_when_piped(repo: Path) ->
         cwd=repo, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
         env={**os.environ, "PYTHONPATH": str(Path(__file__).resolve().parents[1])},
     ).stdout
-    assert out.index("RELEASE fraud-juggler-1.5.0-rc0 FINISHED!") < out.index("CONNECTOR platform-build")
+    assert out.index("RELEASE example-app-1.5.0-rc0 FINISHED!") < out.index("CONNECTOR platform-build")
     assert out.index("CONNECTOR platform-build") < out.index("[platform-build] questions exploded")
