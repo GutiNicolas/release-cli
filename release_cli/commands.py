@@ -24,7 +24,7 @@ COMMANDS = ("connector", "connectors", "hook", "edit", "update")
 GITHUB_URL = re.compile(r"^(https://[^/@\s]+/[^/@\s]+/[^/@\s]+?)(?:\.git)?/?(?:@(\S+))?$")
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 SLACK_WARNING = (
-    "slack_cloud sends the review to a Cursor Cloud Agent instead of the local `agent`. "
+    "slack_cloud sends the review to a Cursor Cloud Agent instead of opening a chat in the Cursor app. "
     "It runs in the cloud: that agent needs the same integrations (e.g. the Datadog MCP) to see the errors, "
     "and cloud_command must be set to the command that starts it."
 )
@@ -141,7 +141,7 @@ def after_install(root: Path, *, defaults: bool, ask: prompts.Ask = input) -> No
     data = cx.load_release_toml()
     if "notify" not in data.get("cursor-review", {}):
         enable = prompts.ask_bool(
-            "Enable cursor-review (local Cursor agent looks at errors 10 min after a deploy, desktop notification)?",
+            "Enable cursor-review (open a Cursor app chat 10 min after a deploy, desktop notification)?",
             False,
             defaults=defaults,
             ask=ask,
