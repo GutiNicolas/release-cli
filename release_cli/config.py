@@ -59,7 +59,7 @@ def _value(value: Any) -> str:
 
 def dump_toml(data: dict[str, Any], _prefix: str = "") -> str:
     """Tiny TOML writer for the shapes this CLI stores (scalars, lists, tables, arrays of tables)."""
-    # juggler: no dates, no inline tables, no nested arrays of tables; add them when a config needs one.
+    # no dates, no inline tables, no nested arrays of tables; add them when a config needs one.
     lines: list[str] = []
     tables: list[tuple[str, dict[str, Any]]] = []
     arrays: list[tuple[str, list[dict[str, Any]]]] = []

@@ -15,7 +15,7 @@ from release_cli.config import load
 from tests.conftest import write_config
 
 FAKE = str(Path(__file__).parent / "fixtures" / "fake_connector.py")
-POM = Path(__file__).parent / "fixtures" / "juggler-like.pom.xml"
+POM = Path(__file__).parent / "fixtures" / "example-app.pom.xml"
 
 
 def install_fakes(*specs: tuple[str, str], **flags: dict[str, Any]) -> None:
@@ -60,13 +60,13 @@ def run_requests(project: Path, name: str | None = None) -> list[dict[str, Any]]
 
 def test_bool_choice_text_answers_and_text_persisted(project: Path) -> None:
     install_fakes(("a", "types"))
-    ok, state = run(project, ["y", "dev", "FRAUD"])
+    ok, state = run(project, ["y", "dev", "DEMO"])
     assert ok and state["a"]["status"] == "ok"
-    assert state["a"]["result"]["answers"] == {"go": True, "env": "dev", "key": "FRAUD"}
-    assert load(project).connectors["a"] == {"key": "FRAUD"}
+    assert state["a"]["result"]["answers"] == {"go": True, "env": "dev", "key": "DEMO"}
+    assert load(project).connectors["a"] == {"key": "DEMO"}
     ok, state = run(project, ["", ""])
-    assert state["a"]["result"]["answers"] == {"go": False, "env": "qa", "key": "FRAUD"}
-    assert run_requests(project)[-1]["config"] == {"key": "FRAUD"}
+    assert state["a"]["result"]["answers"] == {"go": False, "env": "qa", "key": "DEMO"}
+    assert run_requests(project)[-1]["config"] == {"key": "DEMO"}
 
 
 def test_defaults_takes_each_default_and_never_invents_text(project: Path, capsys: pytest.CaptureFixture[str]) -> None:
@@ -76,9 +76,9 @@ def test_defaults_takes_each_default_and_never_invents_text(project: Path, capsy
     assert state["a"]["status"] == "failed"
     assert "release edit config set a key <value>" in state["a"]["error"]
     assert run_requests(project) == []
-    commands.edit(project, ["config", "set", "a", "key", "FRAUD"])
+    commands.edit(project, ["config", "set", "a", "key", "DEMO"])
     ok, state = run(project, defaults=True)
-    assert ok and state["a"]["result"]["answers"] == {"go": False, "env": "qa", "key": "FRAUD"}
+    assert ok and state["a"]["result"]["answers"] == {"go": False, "env": "qa", "key": "DEMO"}
 
 
 @pytest.mark.parametrize(
@@ -156,7 +156,7 @@ def test_prior_passes_result_from_one_to_the_next(project: Path) -> None:
     assert b["prior"]["a"]["result"]["by"] == "a"
     for key in ("repo", "artifact", "release_version", "tags", "sha", "mode", "dry_run", "answers"):
         assert key in b
-    assert b["tags"] == ["1.5.0-rc0", "fraud-juggler-1.5.0-rc0"] and b["mode"] == "rc"
+    assert b["tags"] == ["1.5.0-rc0", "example-app-1.5.0-rc0"] and b["mode"] == "rc"
 
 
 def test_not_applies_skips_run(project: Path) -> None:

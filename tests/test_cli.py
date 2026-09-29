@@ -10,7 +10,7 @@ from release_cli.gitops import RepoState
 from release_cli import gitops
 from tests.conftest import write_config
 
-FIXTURE = Path(__file__).parent / "fixtures" / "juggler-like.pom.xml"
+FIXTURE = Path(__file__).parent / "fixtures" / "example-app.pom.xml"
 
 
 def _maven_project(tmp_path: Path, xml: str | None = None) -> None:

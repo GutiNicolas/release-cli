@@ -24,8 +24,8 @@ COMMANDS = ("connector", "connectors", "hook", "edit", "update")
 GITHUB_URL = re.compile(r"^(https://[^/@\s]+/[^/@\s]+/[^/@\s]+?)(?:\.git)?/?(?:@(\S+))?$")
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 SLACK_WARNING = (
-    "slack_cloud sends the review to a Cursor Cloud Agent instead of the local `agent`. "
-    "It runs in the cloud: that agent needs the same integrations (e.g. the Datadog MCP) to see the errors, "
+    "slack_cloud sends the review to a Cursor Cloud Agent instead of opening a chat in the Cursor app. "
+    "It runs in the cloud: that agent needs the same integrations (e.g. a logs MCP) to see the errors, "
     "and cloud_command must be set to the command that starts it."
 )
 DISCOVER = """\
@@ -96,7 +96,7 @@ def build_parser() -> argparse.ArgumentParser:
     upd.add_argument("--after-install", metavar="CLONE", help=argparse.SUPPRESS)
 
     edit = sub.add_parser("edit", help="edit hooks, connectors, order, and connector config (interactive without args)")
-    edit.add_argument("words", nargs=argparse.REMAINDER, help="one editor command, e.g. `config set platform-deploy jira_project_key FRAUD`")
+    edit.add_argument("words", nargs=argparse.REMAINDER, help="one editor command, e.g. `config set platform-deploy jira_project_key DEMO`")
     return parser
 
 
@@ -141,7 +141,7 @@ def after_install(root: Path, *, defaults: bool, ask: prompts.Ask = input) -> No
     data = cx.load_release_toml()
     if "notify" not in data.get("cursor-review", {}):
         enable = prompts.ask_bool(
-            "Enable cursor-review (local Cursor agent looks at errors 10 min after a deploy, desktop notification)?",
+            "Enable cursor-review (open a Cursor app chat 10 min after a deploy, desktop notification)?",
             False,
             defaults=defaults,
             ask=ask,
