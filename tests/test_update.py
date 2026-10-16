@@ -120,10 +120,41 @@ def test_new_key_with_defaults_through_update(env: dict[str, Path]) -> None:
 
 
 def test_key_already_set_is_neither_asked_nor_changed(env: dict[str, Path]) -> None:
-    connectors.save_release_toml({"cursor-review": {"notify": True}})
+    connectors.save_release_toml({"cursor-review": {"notify": True, "surface": "classic"}})
     assert update.ensure_config(defaults=False, ask=lambda _p: pytest.fail("asked")) == []
     data = connectors.load_release_toml()
-    assert data["cursor-review"]["notify"] is True and data["config_version"] == update.config_version()
+    assert data["cursor-review"]["notify"] is True and data["cursor-review"]["surface"] == "classic"
+    assert data["config_version"] == update.config_version()
+
+
+def test_enabled_review_asks_where_it_opens(env: dict[str, Path]) -> None:
+    connectors.save_release_toml({"cursor-review": {"notify": True}})
+    folder = env["tmp"] / "watch"
+    folder.mkdir()
+    prompts: list[str] = []
+    answers = iter(["agents", str(folder)])
+    asked = update.ensure_config(defaults=False, ask=lambda p: prompts.append(p) or next(answers), log=lambda _m: None)
+    assert asked == ["cursor-review.surface", "cursor-review.open_folder"]
+    assert "(agents/classic) [agents]" in prompts[0]
+    assert "empty = the deployed repo" in prompts[1]
+    saved = connectors.load_release_toml()["cursor-review"]
+    assert saved["surface"] == "agents" and saved["open_folder"] == str(folder)
+
+
+def test_agents_folder_is_asked_again_until_it_exists(env: dict[str, Path]) -> None:
+    connectors.save_release_toml({"cursor-review": {"notify": True, "surface": "agents"}})
+    prompts: list[str] = []
+    answers = iter(["nope", ""])
+    asked = update.ensure_config(defaults=False, ask=lambda p: prompts.append(p) or next(answers), log=lambda _m: None)
+    assert asked == ["cursor-review.open_folder"]
+    assert len(prompts) == 2
+    assert connectors.load_release_toml()["cursor-review"]["open_folder"] == ""
+
+
+def test_disabled_review_does_not_ask_where(env: dict[str, Path]) -> None:
+    connectors.save_release_toml({"cursor-review": {"notify": False}})
+    assert update.ensure_config(defaults=False, ask=lambda _p: pytest.fail("asked")) == []
+    assert "surface" not in connectors.load_release_toml()["cursor-review"]
 
 
 def test_unknown_hand_written_keys_stay(env: dict[str, Path]) -> None:
@@ -181,9 +212,10 @@ def test_uv_receipt_is_the_fallback_and_source_toml_is_written(env: dict[str, Pa
 
 
 def test_after_install_asks_cursor_review_only_once(env: dict[str, Path]) -> None:
-    replies = iter(["y"])
+    replies = iter(["y", "", ""])
     commands.after_install(env["clone"], defaults=False, ask=lambda _p: next(replies))
-    assert connectors.load_release_toml()["cursor-review"]["notify"] is True
+    saved = connectors.load_release_toml()["cursor-review"]
+    assert saved["notify"] is True and saved["surface"] == "agents" and saved["open_folder"] == ""
     assert "cursor-review" in connectors.load_global()["connectors"]
     source = update.source_toml_path().read_text(encoding="utf-8")
     assert 'branch = "main"' in source and str(env["remote"]) in source

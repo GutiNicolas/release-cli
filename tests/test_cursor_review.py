@@ -253,6 +253,64 @@ def test_job_stores_absolute_repo_path(fake_bin: Path, monkeypatch: pytest.Monke
     _assert_app_open(fake_bin, "open")
 
 
+def test_agents_surface_opens_the_folder_without_classic_flags(fake_bin: Path) -> None:
+    folder = fake_bin / "watch"
+    folder.mkdir()
+    req = request(fake_bin)
+    req["config"]["surface"] = "agents"
+    req["config"]["open_folder"] = str(folder)
+    resp = cr.run(req, spawn=lambda _p: 4242)
+    assert resp["ok"]
+    job = cr.read_job(cr.job_path("example-app", "1.0.0"))
+    assert job["surface"] == "agents" and job["open_folder"] == str(folder.resolve())
+    clock = Clock(SUCCESS_EPOCH + 601)
+    assert cr.work(cr.job_path("example-app", "1.0.0"), now=clock.now, sleep=clock.sleep) == "done"
+    [focus] = recorded(fake_bin, "cursor")
+    assert focus == [str(folder.resolve())]
+    assert "--classic" not in focus and "--new-window" not in focus and "--reuse-window" not in focus
+    assert recorded(fake_bin, "agent") == [] and recorded(fake_bin, "cursor-agent") == []
+    assert recorded(fake_bin, "open")
+
+
+def test_agents_without_a_folder_uses_the_deployed_repo(fake_bin: Path) -> None:
+    req = request(fake_bin)
+    req["config"]["surface"] = "agents"
+    assert cr.run(req, spawn=lambda _p: 4242)["ok"]
+    clock = Clock(SUCCESS_EPOCH + 601)
+    assert cr.work(cr.job_path("example-app", "1.0.0"), now=clock.now, sleep=clock.sleep) == "done"
+    [focus] = recorded(fake_bin, "cursor")
+    assert focus == [str(fake_bin.resolve())]
+
+
+def test_missing_open_folder_is_refused_before_a_job_starts(fake_bin: Path) -> None:
+    req = request(fake_bin)
+    req["config"]["surface"] = "agents"
+    req["config"]["open_folder"] = str(fake_bin / "missing")
+    resp = cr.run(req, spawn=lambda _p: pytest.fail("spawned"))
+    assert resp["ok"] is False and "open_folder" in resp["error"]
+
+
+def test_unknown_surface_is_refused(fake_bin: Path) -> None:
+    req = request(fake_bin)
+    req["config"]["surface"] = "ide"
+    resp = cr.run(req, spawn=lambda _p: pytest.fail("spawned"))
+    assert resp["ok"] is False and "surface" in resp["error"]
+
+
+def test_deleted_open_folder_does_not_fire_the_deeplink(fake_bin: Path) -> None:
+    folder = fake_bin / "gone"
+    folder.mkdir()
+    req = request(fake_bin)
+    req["config"]["surface"] = "agents"
+    req["config"]["open_folder"] = str(folder)
+    assert cr.run(req, spawn=lambda _p: 4242)["ok"]
+    folder.rmdir()
+    clock = Clock(SUCCESS_EPOCH + 601)
+    assert cr.work(cr.job_path("example-app", "1.0.0"), now=clock.now, sleep=clock.sleep) == "failed"
+    assert recorded(fake_bin, "cursor") == []
+    assert recorded(fake_bin, "open") == []
+
+
 def test_failed_focus_does_not_fire_the_deeplink(fake_bin: Path) -> None:
     (fake_bin / "bin" / "cursor").write_text(
         f"#!{sys.executable}\nimport sys\nsys.exit(2)\n",

@@ -96,6 +96,20 @@ def test_edit_config_share_and_origins(tmp_path: Path, capsys: pytest.CaptureFix
     assert "notify" not in connectors.global_path().read_text(encoding="utf-8")
 
 
+def test_edit_surface_rejects_unknown_and_saves_agents(tmp_path: Path) -> None:
+    commands.connector_add("cursor-review", defaults=True)
+    with pytest.raises(commands.ConfigError, match="surface must be"):
+        commands.edit(tmp_path, ["global", "set", "cursor-review", "surface", "ide"])
+    folder = tmp_path / "watch"
+    folder.mkdir()
+    commands.edit(tmp_path, ["global", "set", "cursor-review", "surface", "agents"])
+    commands.edit(tmp_path, ["global", "set", "cursor-review", "open_folder", str(folder)])
+    saved = connectors.load_release_toml()["cursor-review"]
+    assert saved["surface"] == "agents" and saved["open_folder"] == str(folder)
+    with pytest.raises(commands.ConfigError, match="not a directory"):
+        commands.edit(tmp_path, ["global", "set", "cursor-review", "open_folder", str(tmp_path / "missing")])
+
+
 def test_edit_slack_cloud_warns(capsys: pytest.CaptureFixture[str]) -> None:
     commands.connector_add("cursor-review", defaults=True)
     commands.edit(Path.cwd(), ["global", "set", "cursor-review", "slack_cloud", "true"])
