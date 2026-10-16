@@ -17,6 +17,7 @@ from typing import Any, Callable
 from release_cli import connectors as cx
 from release_cli import prompts
 from release_cli.config import dump_toml, loads_toml
+from release_cli.cursor_review import SURFACES
 
 INSTALL_URL = "https://github.com/GutiNicolas/release-cli"
 PACKAGE = "release-cli"
@@ -39,10 +40,43 @@ class Key:
     # config_version in which the meaning changed; users below it are asked again, seeing their value.
     changed: int | None = None
     change_note: str = ""
+    options: tuple[str, ...] = ()
+    required: bool = True
+    # Ask only when another key in the same table already has this value.
+    when: tuple[str, Any] | None = None
+    validate: Callable[[str], str | None] | None = None
+
+
+def _directory_or_empty(raw: str) -> str | None:
+    if not raw:
+        return None
+    if not Path(raw).expanduser().is_dir():
+        return f"{raw} is not a directory"
+    return None
 
 
 REGISTRY: tuple[Key, ...] = (
     Key("cursor-review", "notify", False, "cursor-review: desktop notification when a post-deploy review finishes?", since=1),
+    # Question default is agents. The runtime default stays classic until this is saved, so an old install does not switch on its own.
+    Key(
+        "cursor-review",
+        "surface",
+        "agents",
+        "cursor-review: where should the post-deploy review open?",
+        since=2,
+        options=SURFACES,
+        when=("notify", True),
+    ),
+    Key(
+        "cursor-review",
+        "open_folder",
+        "",
+        "cursor-review: Agents folder for that chat (empty = the deployed repo, so its skills and MCPs apply)",
+        since=2,
+        required=False,
+        when=("surface", "agents"),
+        validate=_directory_or_empty,
+    ),
 )
 
 
@@ -51,9 +85,26 @@ def config_version() -> int:
 
 
 def _ask_key(key: Key, default: Any, *, defaults: bool, ask: prompts.Ask) -> Any:
+    if key.options:
+        shown = str(default) if str(default) in key.options else str(key.default)
+        return prompts.ask_choice(key.question, list(key.options), shown, defaults=defaults, ask=ask)
     if isinstance(key.default, bool):
         return prompts.ask_bool(key.question, bool(default), defaults=defaults, ask=ask)
-    return prompts.ask_text(key.question, str(default), defaults=defaults, ask=ask)
+    return prompts.ask_text(
+        key.question,
+        "" if default is None else str(default),
+        required=key.required,
+        defaults=defaults,
+        ask=ask,
+        validate=key.validate or (lambda _v: None),
+    )
+
+
+def _applies(key: Key, table: dict[str, Any]) -> bool:
+    if key.when is None:
+        return True
+    other, expected = key.when
+    return table.get(other) == expected
 
 
 def ensure_config(*, defaults: bool, ask: prompts.Ask = input, log: Callable[[str], None] = print) -> list[str]:
@@ -65,6 +116,8 @@ def ensure_config(*, defaults: bool, ask: prompts.Ask = input, log: Callable[[st
     asked: list[str] = []
     for key in REGISTRY:
         table = data.setdefault(key.table, {})
+        if not _applies(key, table):
+            continue
         label = f"{key.table}.{key.name}"
         if key.name not in table:
             table[key.name] = _ask_key(key, key.default, defaults=defaults, ask=ask)

@@ -5,6 +5,9 @@ until a wall-clock target, hands the prompt to the already-running Cursor app (n
 `agent` / `cursor-agent`), and posts a desktop notification (osascript on macOS,
 notify-send on Linux when present).
 
+`surface=agents` (asked on install) opens that chat in the Agents window, under a folder
+you choose or under the deployed repo. `surface=classic` pins the IDE window instead.
+
     python -m release_cli.cursor_review questions|run   (protocol 1 on stdin/stdout)
     python -m release_cli.cursor_review worker <job.json>
 """
@@ -25,9 +28,14 @@ from urllib.parse import urlencode
 
 from release_cli.connectors import data_dir, load_release_toml
 
+SURFACES = ("agents", "classic")
+
 DEFAULTS: dict[str, Any] = {
     "delay_minutes": 10,
     "notify": False,
+    # Unset keeps the IDE. Install asks and saves `agents` when you opt in.
+    "surface": "classic",
+    "open_folder": "",
     "slack_cloud": False,
     "cloud_command": [],
     "cursor_bin": "cursor",
@@ -251,11 +259,33 @@ def repo_abs(job: dict[str, Any]) -> str:
     return str(Path(job["cwd"]).expanduser().resolve())
 
 
+def job_surface(job: dict[str, Any]) -> str:
+    """`agents` opens the Agents window. Anything already saved as classic, and jobs from before this setting, stay on the IDE."""
+    surface = str(job.get("surface") or "classic")
+    return surface if surface in SURFACES else "classic"
+
+
+def review_folder(job: dict[str, Any]) -> str:
+    """Agents folder for this run. Empty means the deployed repo, so the chat shows under that project."""
+    if job_surface(job) == "agents":
+        chosen = str(job.get("open_folder") or "").strip()
+        if chosen:
+            return str(Path(chosen).expanduser().resolve())
+    return repo_abs(job)
+
+
 def focus_repo_command(job: dict[str, Any]) -> list[str] | None:
-    """Pin the already-open editor window for this folder. --classic avoids the Agents/clone UI; no --reuse-window/--new-window."""
-    folder = repo_abs(job)
+    """Open `review_folder` in the configured surface.
+
+    agents: `cursor <folder>` with no `--classic`, `--new-window`, or `--reuse-window`.
+    When the Agents window was the last Cursor window, that starts a new agent for the folder.
+    classic: `cursor --classic <folder>` pins the IDE window for that folder.
+    """
+    folder = review_folder(job)
     binary = shutil.which(str(job.get("cursor_bin") or "cursor"))
     if binary:
+        if job_surface(job) == "agents":
+            return [binary, folder]
         return [binary, "--classic", folder]
     if _platform() == "darwin" and shutil.which("open"):
         return ["open", "-a", "Cursor", folder]
@@ -298,21 +328,24 @@ def _handoff(job: dict[str, Any], run: Callable[..., Any], sleep: Callable[[floa
         return (proc.stdout or "") + (proc.stderr or ""), proc.returncode
 
     notes: list[str] = []
-    folder = repo_abs(job)
+    folder = review_folder(job)
+    if str(job.get("open_folder") or "").strip() and not Path(folder).is_dir():
+        return f"review folder does not exist: {folder}\n", 1
     focus = focus_repo_command(job)
     if focus is None:
-        notes.append("could not focus Cursor window: no cursor on PATH")
+        notes.append("could not open Cursor: no cursor on PATH")
         return "\n".join(notes) + "\n", 127
     try:
         proc = run(focus, cwd=folder, capture_output=True, text=True, check=False)
     except OSError as exc:
-        notes.append(f"could not focus Cursor window ({focus[0]}): {exc}")
+        notes.append(f"could not open Cursor ({focus[0]}): {exc}")
         return "\n".join(notes) + "\n", 127
     extra = ((proc.stdout or "") + (proc.stderr or "")).strip()
     if extra:
         notes.append(extra)
     if proc.returncode != 0:
-        notes.append(f"could not pin Cursor window for {folder} (exit {proc.returncode})")
+        where = "Agents window" if job_surface(job) == "agents" else "IDE window"
+        notes.append(f"could not open the {where} for {folder} (exit {proc.returncode})")
         return "\n".join(notes) + "\n", proc.returncode
     raise_cmd = raise_cursor_command()
     if raise_cmd:
@@ -394,6 +427,26 @@ def run(req: dict[str, Any], *, now: Callable[[], float] = time.time, spawn: Cal
             "error": "slack_cloud is on but cloud_command is empty; set it with `release edit` or turn slack_cloud off",
             "result": {"scheduled": False},
         }
+    surface = str(cfg.get("surface") or "classic")
+    if surface not in SURFACES:
+        return {
+            "protocol": 1,
+            "ok": False,
+            "error": f"cursor-review surface must be agents or classic, got {surface!r}",
+            "result": {"scheduled": False},
+        }
+    folder = str(cfg.get("open_folder") or "").strip()
+    if surface == "agents" and folder:
+        folder = str(Path(folder).expanduser().resolve())
+        if not Path(folder).is_dir():
+            return {
+                "protocol": 1,
+                "ok": False,
+                "error": f"cursor-review open_folder does not exist: {folder}",
+                "result": {"scheduled": False},
+            }
+    else:
+        folder = ""
     delay = float(cfg["delay_minutes"])
     succeeded = _parse_time(result.get("succeeded_at"), now())
     target = succeeded + delay * 60
@@ -406,6 +459,8 @@ def run(req: dict[str, Any], *, now: Callable[[], float] = time.time, spawn: Cal
             "prompt": build_prompt(req, result, succeeded, delay, answers.get("extra_prompt") or ""),
             "cwd": str(Path(req["repo_root"]).expanduser().resolve()),
             "notify": _truthy(cfg["notify"]),
+            "surface": surface,
+            "open_folder": folder,
             "cloud": cloud,
             "cloud_command": list(cfg["cloud_command"]),
             "cursor_bin": cfg["cursor_bin"],

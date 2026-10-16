@@ -141,7 +141,7 @@ def after_install(root: Path, *, defaults: bool, ask: prompts.Ask = input) -> No
     data = cx.load_release_toml()
     if "notify" not in data.get("cursor-review", {}):
         enable = prompts.ask_bool(
-            "Enable cursor-review (open a Cursor app chat 10 min after a deploy, desktop notification)?",
+            "Enable cursor-review (a Cursor chat 10 min after a deploy; next it asks where that chat opens)?",
             False,
             defaults=defaults,
             ask=ask,
@@ -606,6 +606,10 @@ def _set_connector_flag(cwd: Path, name: str, key: str, value: bool, *, project:
 
 
 def _global_set(name: str, key: str, value: Any) -> None:
+    if name == "cursor-review" and key == "surface" and value not in cursor_review.SURFACES:
+        raise ConfigError(f"surface must be {' or '.join(cursor_review.SURFACES)}, got {value!r}")
+    if name == "cursor-review" and key == "open_folder" and str(value).strip() and not Path(str(value)).expanduser().is_dir():
+        raise ConfigError(f"{value} is not a directory")
     if any(k.table == name and k.name == key for k in update.REGISTRY):
         data = cx.load_release_toml()
         data.setdefault(name, {})[key] = value
