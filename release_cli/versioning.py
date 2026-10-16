@@ -61,6 +61,7 @@ def plan(
     final: bool,
     bump: Bump | None = None,
     explicit: str | None = None,
+    override: bool = False,
 ) -> ReleasePlan:
     if bump and explicit:
         raise PlanError("use either --major/--minor/--patch or an explicit version, not both")
@@ -77,12 +78,15 @@ def plan(
 
     if current.rc is not None:
         if bump or explicit:
-            raise PlanError(
-                f"a release candidate is already in progress ({current.format()}). "
-                "use `release -rc` to increment it or `release -fv` to finalize"
-            )
-        release = replace(current, rc=current.rc + 1, snapshot=False)
-        return ReleasePlan(release, replace(release, snapshot=True))
+            if not override:
+                raise PlanError(
+                    f"a release candidate is already in progress ({current.format()}). "
+                    "use `release -rc` to increment it or `release -fv` to finalize"
+                )
+            current = replace(current, rc=None)
+        else:
+            release = replace(current, rc=current.rc + 1, snapshot=False)
+            return ReleasePlan(release, replace(release, snapshot=True))
 
     if explicit:
         base = parse(explicit)

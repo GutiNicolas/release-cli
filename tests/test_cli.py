@@ -5,9 +5,9 @@ from pathlib import Path
 
 import pytest
 
+from release_cli import gitops, prompts
 from release_cli.cli import _paint, build_parser, main
 from release_cli.gitops import RepoState
-from release_cli import gitops
 from tests.conftest import write_config
 
 FIXTURE = Path(__file__).parent / "fixtures" / "example-app.pom.xml"
@@ -53,11 +53,65 @@ def test_fv_without_rc_exits(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) ->
         main(["-fv", "--dry-run"])
 
 
-def test_major_during_rc_exits(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    _maven_project(tmp_path, FIXTURE.read_text(encoding="utf-8").replace("1.4.0-SNAPSHOT", "1.4.0-rc2-SNAPSHOT"))
+def _open_rc(tmp_path: Path) -> None:
+    xml = FIXTURE.read_text(encoding="utf-8").replace("1.4.0-SNAPSHOT", "1.4.0-rc2-SNAPSHOT")
+    _maven_project(tmp_path, xml)
+
+
+def _answer(monkeypatch: pytest.MonkeyPatch, reply: str) -> list[str]:
+    asked: list[str] = []
+    real = prompts.ask_bool
+
+    def fake(prompt: str, default: bool, *, defaults: bool = False, ask=input) -> bool:
+        return real(prompt, default, defaults=defaults, ask=lambda text: asked.append(text) or reply)
+
+    monkeypatch.setattr(prompts, "ask_bool", fake)
+    return asked
+
+
+def test_major_during_rc_exits_when_overwrite_declined(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _open_rc(tmp_path)
     monkeypatch.chdir(tmp_path)
-    with pytest.raises(SystemExit):
+    asked = _answer(monkeypatch, "n")
+    with pytest.raises(SystemExit) as exc:
         main(["-rc", "--major", "--dry-run"])
+    assert exc.value.code == 1
+    assert "already in progress" in capsys.readouterr().err
+    assert asked == [
+        "a release candidate is already in progress (1.4.0-rc2-SNAPSHOT). overwrite it with 2.0.0-rc0? (y/n) [n]: "
+    ]
+    assert "1.4.0-rc2-SNAPSHOT" in (tmp_path / "pom.xml").read_text(encoding="utf-8")
+
+
+def test_explicit_version_overwrites_open_rc_when_confirmed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _open_rc(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    asked = _answer(monkeypatch, "y")
+    main(["-rc", "2.93.0", "--dry-run"])
+    assert asked == [
+        "a release candidate is already in progress (1.4.0-rc2-SNAPSHOT). overwrite it with 2.93.0-rc0? (y/n) [n]: "
+    ]
+    out = capsys.readouterr().out
+    assert "CURRENT VERSION: 1.4.0-rc2-SNAPSHOT" in out
+    assert "RELEASE VERSION: 2.93.0-rc0" in out
+    assert "1.4.0-rc2-SNAPSHOT" in (tmp_path / "pom.xml").read_text(encoding="utf-8")
+
+
+def test_defaults_does_not_overwrite_open_rc(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _open_rc(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    asked = _answer(monkeypatch, "y")
+    with pytest.raises(SystemExit) as exc:
+        main(["-rc", "2.93.0", "--dry-run", "--defaults"])
+    assert exc.value.code == 1
+    assert asked == []
+    assert "already in progress" in capsys.readouterr().err
 
 
 def _clean_repo(monkeypatch: pytest.MonkeyPatch) -> None:

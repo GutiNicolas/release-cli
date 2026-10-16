@@ -669,12 +669,46 @@ def run_chain(
     log: Callable[[str], None],
     ask: prompts.Ask = input,
 ) -> bool:
-    """Run enabled connectors in order. Returns False if any failed. Never touches git."""
+    """Ask every enabled connector, then run that chain. Returns False if any failed. Never touches git.
+
+    `prior` during questions is only what already finished (a resume). Connectors about to run in
+    this invocation are not in it yet, so they must ask without that result and refuse at run time.
+    """
     tag = context["release_version"]
     saved: dict[str, Any] = state.setdefault("connectors", {})
+    # name -> (request, answers, timeout, resume_job)
+    ready: dict[str, tuple[dict[str, Any], dict[str, Any], float, str | None]] = {}
+    early: dict[str, Outcome] = {}
     all_ok = True
+    ask_further = True
+
+    def record(conn: Connector, outcome: Outcome, resume_job: str | None, *, publish: bool = True) -> bool:
+        """Persist and log `outcome`. True when break_on_error stops the rest of the chain.
+
+        `publish=False` keeps a question-time failure out of `prior` until the run phase, so later
+        connectors are still asked against the prior that already finished.
+        """
+        nonlocal all_ok
+        if outcome.job_id is None and outcome.status == "interrupted" and resume_job:
+            outcome.job_id = resume_job
+        saved[conn.name] = {**outcome.entry(), "updated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
+        save_state(state)
+        if publish:
+            prior[conn.name] = outcome.entry()
+        if outcome.status == "ok":
+            log(f"{conn.name}: ok")
+            return False
+        all_ok = False
+        log(f"{conn.name}: {outcome.status}: {outcome.error or 'no reason given'}")
+        if outcome.job_id:
+            log(f"  job_id: {outcome.job_id}")
+        log(f"  the tag {tag} stays pushed. resume: {resume_hint(tag, conn.name)}")
+        if outcome.ctrl_c:
+            raise ChainInterrupted(conn.name)
+        return outcome.status != "ok" and conn.break_on_error
+
     for conn in conns:
-        if not conn.enabled:
+        if not conn.enabled or not ask_further:
             continue
         previous = saved.get(conn.name) or {}
         resume_job = previous.get("job_id") if previous.get("status") == "interrupted" else None
@@ -708,26 +742,33 @@ def run_chain(
             answers = collect_answers(conn, qs.items, cwd=cwd, project_values=project_values, defaults=defaults, ask=ask)
         except ConnectorError as exc:
             outcome = Outcome(status="failed", error=str(exc))
-        else:
-            timeout = conn.timeout_seconds or qs.timeout_seconds or DEFAULT_RUN_TIMEOUT
-            request["config"] = {**conn.config, **project_values}
-            outcome = run_connector(conn, {**request, "action": "run", "answers": answers}, timeout)
-        if outcome.job_id is None and outcome.status == "interrupted" and resume_job:
-            outcome.job_id = resume_job
-        saved[conn.name] = {**outcome.entry(), "updated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
-        save_state(state)
-        prior[conn.name] = outcome.entry()
-        if outcome.status == "ok":
-            log(f"{conn.name}: ok")
+            early[conn.name] = outcome
+            if record(conn, outcome, resume_job, publish=False):
+                ask_further = False
+                if dry_run:
+                    log(f"  break_on_error: chain stopped after {conn.name}")
             continue
-        all_ok = False
-        log(f"{conn.name}: {outcome.status}: {outcome.error or 'no reason given'}")
-        if outcome.job_id:
-            log(f"  job_id: {outcome.job_id}")
-        log(f"  the tag {tag} stays pushed. resume: {resume_hint(tag, conn.name)}")
-        if outcome.ctrl_c:
-            raise ChainInterrupted(conn.name)
-        if conn.break_on_error:
+        timeout = conn.timeout_seconds or qs.timeout_seconds or DEFAULT_RUN_TIMEOUT
+        request["config"] = {**conn.config, **project_values}
+        ready[conn.name] = (request, answers, timeout, resume_job)
+
+    if dry_run:
+        return all_ok
+
+    for conn in conns:
+        if conn.name in early:
+            prior[conn.name] = early[conn.name].entry()
+            if conn.break_on_error:
+                log(f"  break_on_error: chain stopped after {conn.name}")
+                break
+            continue
+        planned = ready.get(conn.name)
+        if planned is None:
+            continue
+        request, answers, timeout, resume_job = planned
+        log(f"running {conn.name}" + (f" (resuming job {resume_job})" if resume_job else ""))
+        outcome = run_connector(conn, {**request, "action": "run", "answers": answers}, timeout)
+        if record(conn, outcome, resume_job):
             log(f"  break_on_error: chain stopped after {conn.name}")
             break
     return all_ok
