@@ -6,14 +6,14 @@ import argparse
 import sys
 from pathlib import Path
 
-from release_cli import adapters, commands, gitops
+from release_cli import adapters, commands, gitops, prompts
 from release_cli.adapters.base import AdapterError
 from release_cli.config import Config, ConfigError, load
 from release_cli.connectors import ChainInterrupted, ConnectorError
 from release_cli.hooks import HookError, run_hooks
 from release_cli.init import InitError, initialize
 from release_cli.ui import GREEN, _paint, fail, info
-from release_cli.versioning import Bump, PlanError, parse, plan
+from release_cli.versioning import Bump, PlanError, ProjectVersion, ReleasePlan, parse, plan
 
 HELP_EPILOG = """\
 hooks vs connectors:
@@ -80,6 +80,20 @@ def _bump_from(ns: argparse.Namespace) -> Bump | None:
     if ns.patch:
         return "patch"
     return None
+
+
+def _plan_release(current: ProjectVersion, ns: argparse.Namespace, bump: Bump | None) -> ReleasePlan:
+    """Plan the release. A new series while an RC is open asks before replacing it."""
+    override = False
+    if not ns.fv and current.rc is not None and (bump or ns.version):
+        preview = plan(current, final=False, bump=bump, explicit=ns.version, override=True)
+        override = prompts.ask_bool(
+            f"a release candidate is already in progress ({current.format()}). "
+            f"overwrite it with {preview.release.format()}?",
+            False,
+            defaults=ns.defaults,
+        )
+    return plan(current, final=ns.fv, bump=bump, explicit=ns.version, override=override)
 
 
 def _preflight_clean(planned_tags: list[str], *, check_remote: bool) -> None:
@@ -182,7 +196,7 @@ def main(argv: list[str] | None = None) -> None:
     try:
         state = adapter.read(cwd, cfg)
         current = parse(state.version)
-        planned = plan(current, final=ns.fv, bump=bump, explicit=ns.version)
+        planned = _plan_release(current, ns, bump)
     except (AdapterError, PlanError) as exc:
         fail(str(exc))
 

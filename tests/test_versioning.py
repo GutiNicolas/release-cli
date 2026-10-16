@@ -60,6 +60,21 @@ def test_flags_during_rc_error() -> None:
         plan(current, final=False, explicit="2.80.0")
 
 
+def test_override_restarts_series_from_open_rc() -> None:
+    current = parse("2.92.0-rc5-SNAPSHOT")
+    explicit = plan(current, final=False, explicit="2.93.0", override=True)
+    assert explicit.release.format() == "2.93.0-rc0"
+    assert explicit.next_snapshot.format() == "2.93.0-rc0-SNAPSHOT"
+    assert plan(current, final=False, bump="minor", override=True).release.format() == "2.93.0-rc0"
+    assert plan(current, final=False, bump="major", override=True).release.format() == "3.0.0-rc0"
+    assert plan(current, final=False, bump="patch", override=True).release.format() == "2.92.1-rc0"
+
+
+def test_override_without_a_new_base_still_increments() -> None:
+    current = parse("2.92.0-rc5-SNAPSHOT")
+    assert plan(current, final=False, override=True).release.format() == "2.92.0-rc6"
+
+
 def test_bump_and_explicit_conflict() -> None:
     with pytest.raises(PlanError, match="not both"):
         plan(parse("2.74.0-SNAPSHOT"), final=False, bump="minor", explicit="2.80.0")

@@ -77,7 +77,7 @@ Put the project version in `gradle.properties` (`version=…`) or as a top-level
 | `release -rc 2.80.0` | `2.80.0-rc0` |
 | `release -fv` | Require an RC; tag `X.Y.Z`; leave the project at `X.Y.Z-SNAPSHOT` |
 
-`--major`, `--minor`, `--patch`, and an explicit version apply only when **starting** a series. During an RC they error: use `release -rc` or `release -fv`.
+`--major`, `--minor`, `--patch`, and an explicit version start a new series. If an RC is already open, `release` asks before replacing it in the version file (default **no**; existing tags stay). Declining, or `--defaults`, keeps the previous error: use `release -rc` to increment that candidate or `release -fv` to finalize it.
 
 After a final, the next SNAPSHOT stays at the version you just shipped. The next bump happens on the following `-rc`.
 
@@ -162,7 +162,7 @@ Values a connector asks once per project (for example `version_tag`, `jira_proje
 
 ### Each run
 
-After the push, each enabled connector shows its questions (Enter takes that question's default, which the connector picks and can be `n`), then runs. Results pass forward as `prior`.
+After the push, every enabled connector asks its questions first (Enter takes that question's default, which the connector picks and can be `n`). Nothing runs until those answers are in. Then the connectors run in order, and each result is passed to the next as `prior`. `prior` during the questions is only a connector that already finished (a resume): a connector that needs an earlier result still asks up front and refuses at run time if that result is missing or failed.
 
 - `break_on_error = true` (default for installed connectors): a failure stops the chain.
 - `break_on_error = false` (default for `cursor-review`): the next connector runs and sees the failure.
@@ -194,7 +194,7 @@ Settings: `release edit` then `global set cursor-review <key> <value>` for `dela
 A connector is a `release.connectors` entry point pointing at a zero-arg callable. release-cli runs it in a subprocess with the action (`questions` or `run`) as `argv[1]`, one JSON request on stdin, and expects one JSON object on stdout. Logs go to stderr and are shown live.
 
 - Request: `protocol`, `action`, `connector`, `repo`, `remote_url`, `repo_root`, `artifact`, `release_version`, `tags`, `sha`, `mode` (`rc`/`fv`), `dry_run`, `prior` (`{name: {status, result, error, job_id}}`), `config`, `resume_job_id`; `run` adds `answers`.
-- `questions` → `{"protocol": 1, "questions": [...], "applies": true, "timeout_seconds": 1860}`. Not for this project: `"applies": false, "reason": "..."` (skipped, exit 0). A prerequisite in `prior` failed (e.g. no `SUCCESS` build): `"applies": false, "blocked": true, "reason": "..."` (recorded `failed` with that reason, exit 1). Question types `bool`, `choice`, `text`, `int`, with `default`, `default_when`, `when`, `persist`, `pattern` (text), `min`/`max` (int). 30 s timeout.
+- `questions` → `{"protocol": 1, "questions": [...], "applies": true, "timeout_seconds": 1860}`. Not for this project: `"applies": false, "reason": "..."` (skipped, exit 0). A prerequisite that **already finished** unsuccessfully (e.g. a resumed build that is not `SUCCESS`): `"applies": false, "blocked": true, "reason": "..."` (recorded `failed` with that reason, exit 1). The CLI asks every connector before any `run`, so `prior` in `questions` does not include connectors that will run in this same invocation. If that result is simply not there yet, return the questions; `run` receives the real `prior` and is where a missing or failed prerequisite is refused. Question types `bool`, `choice`, `text`, `int`, with `default`, `default_when`, `when`, `persist`, `pattern` (text), `min`/`max` (int). 30 s timeout.
 - `run` → `{"protocol": 1, "ok": true, "result": {...}}`, optionally `status` (`interrupted`), `error`, `job_id`.
 - Any other `protocol`, invalid JSON, missing fields, or a non-zero exit from `run` marks the connector `failed` with the reason. On timeout or Ctrl-C the CLI sends SIGINT and waits 10 s for an `interrupted` answer carrying the `job_id`.
 

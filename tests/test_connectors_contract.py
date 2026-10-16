@@ -130,6 +130,35 @@ def test_global_order_with_project_override(project: Path) -> None:
     assert g["order"] == ["a", "b", "c"] and g["connectors"]["b"]["enabled"] is True
 
 
+def test_every_connector_is_asked_before_any_run(project: Path) -> None:
+    install_fakes(("build", "types"), ("deploy", "ok"), ("review", "echo"))
+    ok, state = run(project, ["y", "dev", "DEMO", "y"])
+    assert ok
+    actions = [(c["request"]["connector"], c["action"]) for c in calls(project)]
+    assert actions == [
+        ("build", "questions"),
+        ("deploy", "questions"),
+        ("review", "questions"),
+        ("build", "run"),
+        ("deploy", "run"),
+        ("review", "run"),
+    ]
+    asked = calls(project)
+    deploy_questions = next(c for c in asked if c["action"] == "questions" and c["request"]["connector"] == "deploy")
+    assert deploy_questions["request"]["prior"] == {}
+    assert run_requests(project, "deploy")[0]["prior"]["build"]["status"] == "ok"
+    assert state["review"]["status"] == "ok"
+    assert state["deploy"]["result"]["answers"] == {"go": True}
+
+
+def test_run_failure_does_not_run_the_rest_after_they_were_asked(project: Path) -> None:
+    install_fakes(("build", "fail"), ("deploy", "echo"))
+    ok, state = run(project)
+    assert not ok and "deploy" not in state
+    actions = [(c["request"]["connector"], c["action"]) for c in calls(project)]
+    assert actions == [("build", "questions"), ("deploy", "questions"), ("build", "run")]
+
+
 def test_break_on_error_true_stops_chain(project: Path) -> None:
     install_fakes(("build", "fail"), ("deploy", "echo"))
     ok, state = run(project)
