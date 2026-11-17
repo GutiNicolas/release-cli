@@ -222,9 +222,12 @@ The built-in [`release_cli/cursor_review.py`](release_cli/cursor_review.py) is a
 ```sh
 release status              # version, open RC, last tag, branch vs origin, the last tag's connectors
 release status --json       # the same as one JSON object (--no-fetch skips the fetch)
+release history             # releases of this repo, newest first, with what each connector did
 release notes [tag]         # markdown notes since the previous tag (default: the latest tag)
 release undo 2.75.0-rc1     # deletes that RC's two tags on origin and locally, after asking (--force skips)
 ```
+
+`release history` lists the version tags of the repo (newest first, `--limit N`, default 10; `--finals` hides release candidates; `--json` prints one object) with the tag date and commit. Under each release it shows the saved connector runs of this machine: status, `updated_at`, the error, and for a connector that is not `ok` the command that resumes it. A tag with no saved runs shows `no connector runs on this machine`. It only reads.
 
 `release undo` only takes release candidates: a final may already be used by someone. It does not rewrite history. The version commits stay, so the next `release -rc` creates the next number (`rc2`). It cancels a pending cursor-review of that tag and forgets its saved connector runs. A GitHub Release or a deploy made from the tag is not undone; remove it yourself (`gh release delete <tag>`).
 
