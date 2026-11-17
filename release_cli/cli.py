@@ -53,7 +53,8 @@ resume (state in ~/.local/share/release/runs/{repo}/{tag}.json):
 commands:
   release connector add|ls|update|remove   release connectors run|status <tag>
   release hook add --when before|after --cmd "..."   release edit
-  release status [--json]   release notes [tag]   release undo <rc-tag>
+  release status [--json]   release history [--limit N] [--finals] [--json]
+  release notes [tag]   release undo <rc-tag>
   release update   (pull the release-cli clone and reinstall, from any directory)
 
 CI: --defaults with --json (one JSON object on stdout) or --quiet (result line only).
