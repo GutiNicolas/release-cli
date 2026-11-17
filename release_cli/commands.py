@@ -14,7 +14,7 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
-from release_cli import adapters, cursor_review, github_release, gitops, prompts, update
+from release_cli import adapters, cursor_review, github_release, gitops, hotfix, prompts, update
 from release_cli import connectors as cx
 from release_cli.adapters.base import AdapterError
 from release_cli.config import (
@@ -30,7 +30,7 @@ from release_cli.config import (
 from release_cli.ui import alert, fail, info, warn
 from release_cli.versioning import PlanError, parse
 
-COMMANDS = ("connector", "connectors", "hook", "edit", "update", "status", "undo", "notes")
+COMMANDS = ("connector", "connectors", "hook", "edit", "update", "status", "undo", "notes", "hotfix")
 GITHUB_URL = re.compile(r"^(https://[^/@\s]+/[^/@\s]+/[^/@\s]+?)(?:\.git)?/?(?:@(\S+))?$")
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 SLACK_WARNING = (
@@ -117,6 +117,9 @@ def build_parser() -> argparse.ArgumentParser:
     notes = sub.add_parser("notes", help="release notes (markdown) from the commits since the previous tag")
     notes.add_argument("tag", nargs="?", help="default: the latest version tag")
 
+    hot = sub.add_parser("hotfix", help="branch hotfix/X.Y.Z+1 from the released tag X.Y.Z; `release -rc` there ships the patch")
+    hot.add_argument("tag", help="the released final: X.Y.Z or <artifact>-X.Y.Z")
+
     edit = sub.add_parser("edit", help="edit hooks, connectors, order, and connector config (interactive without args)")
     edit.add_argument("words", nargs=argparse.REMAINDER, help="one editor command, e.g. `config set platform-deploy jira_project_key DEMO`")
     return parser
@@ -141,6 +144,8 @@ def main(argv: list[str]) -> None:
             undo(Path.cwd(), ns.tag, force=ns.force)
         elif ns.command == "notes":
             notes(Path.cwd(), ns.tag)
+        elif ns.command == "hotfix":
+            hotfix.hotfix(Path.cwd(), ns.tag)
         elif ns.command == "hook":
             hook_add(Path.cwd(), when=ns.when, cmd=ns.cmd, url=ns.url, default=ns.default == "y", team=ns.team)
         else:
