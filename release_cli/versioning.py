@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, replace
 from typing import Literal
 
@@ -10,6 +11,19 @@ Bump = Literal["major", "minor", "patch"]
 
 class PlanError(ValueError):
     pass
+
+
+HOTFIX_PREFIX = "hotfix/"
+_HOTFIX_BRANCH = re.compile(r"^hotfix/\d+\.\d+\.\d+$")
+
+
+def hotfix_branch(version: str) -> str:
+    """Branch name for a hotfix that ships `version` (the patch after the released one)."""
+    return f"{HOTFIX_PREFIX}{version}"
+
+
+def is_hotfix_branch(branch: str) -> bool:
+    return bool(_HOTFIX_BRANCH.match(branch))
 
 
 @dataclass(frozen=True)
@@ -62,6 +76,7 @@ def plan(
     bump: Bump | None = None,
     explicit: str | None = None,
     override: bool = False,
+    default_bump: Bump = "minor",
 ) -> ReleasePlan:
     if bump and explicit:
         raise PlanError("use either --major/--minor/--patch or an explicit version, not both")
@@ -95,7 +110,7 @@ def plan(
         release = replace(base, rc=0, snapshot=False)
         return ReleasePlan(release, replace(release, snapshot=True))
 
-    kind: Bump = bump or "minor"
+    kind: Bump = bump or default_bump
     release = replace(_bump_core(current, kind), rc=0, snapshot=False)
     return ReleasePlan(release, replace(release, snapshot=True))
 
