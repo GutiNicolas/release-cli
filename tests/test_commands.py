@@ -130,3 +130,13 @@ def test_release_version_of_accepts_both_tag_forms() -> None:
     assert commands.release_version_of("1.5.0", "example-app") == "1.5.0"
     with pytest.raises(connectors.ConnectorError):
         commands.release_version_of("banana", "example-app")
+
+
+def test_edit_loop_survives_bad_values_and_quotes(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    write_config(tmp_path)
+    commands.connector_add("cursor-review", defaults=True)
+    lines = iter(["global set cursor-review timeout_seconds soon", 'hook add before "unclosed', "hook add before mvn verify", "quit"])
+    commands.edit(tmp_path, [], ask=lambda _p: next(lines))
+    assert [h.cmd for h in load(tmp_path).hooks] == ["mvn verify"]
+    err = capsys.readouterr().err
+    assert "timeout_seconds" in err and "quotation" in err

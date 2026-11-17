@@ -81,8 +81,24 @@ def test_update_from_another_cwd_pulls_and_reinstalls(env: dict[str, Path], caps
     assert git(clone, "rev-parse", "HEAD") == git(env["remote"], "rev-parse", "main")
     assert uv_calls(env) == [["tool", "install", "--force", str(clone)]]
     out = capsys.readouterr().out
-    assert "-> 0.2.0" in out and "connectors were not updated" in out
+    assert "-> 0.2.0" in out and "connectors were not updated" not in out and "built-in updated" not in out
     assert Path.cwd() == env["elsewhere"]
+
+
+def test_update_names_builtin_connectors_and_leaves_url_installs(env: dict[str, Path], capsys: pytest.CaptureFixture[str]) -> None:
+    update.register_source(env["clone"])
+    connectors.save_global({
+        "order": ["cursor-review", "platform-build"],
+        "connectors": {
+            "cursor-review": {"builtin": True, "enabled": True, "break_on_error": False},
+            "platform-build": {"source": "https://github.com/example/platform-build", "sha": "abc", "enabled": True, "break_on_error": True},
+        },
+    })
+    main(["update", "--defaults"])
+    out = capsys.readouterr().out
+    assert "built-in updated with release-cli: cursor-review" in out
+    assert "left on their installed SHA: platform-build" in out
+    assert "connectors were not updated" not in out
 
 
 def test_connectors_toml_and_project_release_stay_byte_for_byte(env: dict[str, Path]) -> None:

@@ -4,16 +4,35 @@ from __future__ import annotations
 
 import argparse
 import sys
+from importlib import metadata
 from pathlib import Path
 
 from release_cli import adapters, commands, gitops, prompts
+from release_cli import connectors as cx
 from release_cli.adapters.base import AdapterError
 from release_cli.config import Config, ConfigError, load
 from release_cli.connectors import ChainInterrupted, ConnectorError
 from release_cli.hooks import HookError, run_hooks
 from release_cli.init import InitError, initialize
-from release_cli.ui import GREEN, _paint, fail, info
-from release_cli.versioning import Bump, PlanError, ProjectVersion, ReleasePlan, parse, plan
+from release_cli.prompts import PromptError
+from release_cli.ui import (
+    GREEN,
+    _paint,
+    emit,
+    fail,
+    info,
+    reset_mode,
+    result,
+    set_mode,
+)
+from release_cli.versioning import (
+    Bump,
+    PlanError,
+    ProjectVersion,
+    ReleasePlan,
+    parse,
+    plan,
+)
 
 HELP_EPILOG = """\
 hooks vs connectors:
@@ -34,7 +53,10 @@ resume (state in ~/.local/share/release/runs/{repo}/{tag}.json):
 commands:
   release connector add|ls|update|remove   release connectors run|status <tag>
   release hook add --when before|after --cmd "..."   release edit
+  release status [--json]   release notes [tag]   release undo <rc-tag>
   release update   (pull the release-cli clone and reinstall, from any directory)
+
+CI: --defaults with --json (one JSON object on stdout) or --quiet (result line only).
 """
 
 
@@ -63,13 +85,23 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="take the configured default on every hook, connector, and --init question (never assumes yes)",
     )
-    parser.add_argument("-y", "--yes", action="store_true", help="deprecated alias of --defaults; removed in the next version")
     parser.add_argument("--init", action="store_true", help="detect the build tool and write .release (never releases)")
     parser.add_argument("--force", action="store_true", help="with --init, overwrite existing config")
     parser.add_argument("--skip-hooks", action="store_true", help="do not prompt or run hooks (connectors still run)")
     parser.add_argument("--skip-connectors", action="store_true", help="do not run connectors after the push")
     parser.add_argument("--tool", choices=("maven", "gradle", "sbt"), help="with --init, force this build tool")
+    out = parser.add_mutually_exclusive_group()
+    out.add_argument("-q", "--quiet", action="store_true", help="print only the result line and errors (hook output goes to stderr)")
+    out.add_argument("--json", action="store_true", help="print one JSON object on stdout (also on errors); everything else on stderr")
+    parser.add_argument("-V", "--version", action="version", version=f"%(prog)s {_version()}")
     return parser
+
+
+def _version() -> str:
+    try:
+        return metadata.version("release-cli")
+    except metadata.PackageNotFoundError:
+        return "unknown"
 
 
 def _bump_from(ns: argparse.Namespace) -> Bump | None:
@@ -96,29 +128,35 @@ def _plan_release(current: ProjectVersion, ns: argparse.Namespace, bump: Bump | 
     return plan(current, final=ns.fv, bump=bump, explicit=ns.version, override=override)
 
 
-def _preflight_clean(planned_tags: list[str], *, check_remote: bool) -> None:
+def _preflight(planned_tags: list[str]) -> list[str]:
+    """Everything that would make the release fail after the hooks ran. Empty means go."""
     try:
-        gitops.current_repo()
+        repo = gitops.current_repo()
     except gitops.GitError as exc:
-        fail(str(exc))
+        return [str(exc)]
+    problems: list[str] = []
     dirty = gitops.porcelain()
     if dirty:
-        fail(f"working tree is not clean:\n{dirty}")
-    for tag in planned_tags:
-        if gitops.tag_exists_local(tag):
-            fail(f"local tag already exists: {tag}")
-        if check_remote:
-            try:
-                if gitops.remote_tag_exists(tag):
-                    fail(f"remote tag already exists: {tag}")
-            except gitops.GitError as exc:
-                fail(str(exc))
+        problems.append(f"working tree is not clean:\n{dirty}")
+    problems += [f"local tag already exists: {tag}" for tag in planned_tags if gitops.tag_exists_local(tag)]
+    try:
+        gitops.fetch_branch(repo.branch)
+        late = gitops.behind(repo.branch)
+        if late:
+            problems.append(
+                f"{repo.branch} is {late} commit(s) behind origin/{repo.branch}; pull first "
+                "(otherwise the push fails after the hooks already ran, e.g. after a deploy)"
+            )
+        problems += [f"remote tag already exists: {tag}" for tag in planned_tags if gitops.remote_tag_exists(tag)]
+    except gitops.GitError as exc:
+        problems.append(f"cannot check origin: {exc}")
+    return problems
 
 
 def _print_line_diff(before: str, after: str) -> None:
     old_lines = before.splitlines()
     new_lines = after.splitlines()
-    for idx, (old, new) in enumerate(zip(old_lines, new_lines), start=1):
+    for idx, (old, new) in enumerate(zip(old_lines, new_lines, strict=False), start=1):
         if old != new:
             info(f"- {idx}: {old}")
             info(f"+ {idx}: {new}")
@@ -175,9 +213,14 @@ def main(argv: list[str] | None = None) -> None:
         commands.main(argv)
         return
     ns = build_parser().parse_args(argv)
-    if ns.yes:
-        print("WARNING: -y/--yes is deprecated; use --defaults (takes each configured default, not always yes)", file=sys.stderr)
-        ns.defaults = True
+    set_mode(quiet=ns.quiet, as_json=ns.json)
+    try:
+        _release(ns)
+    finally:
+        reset_mode()
+
+
+def _release(ns: argparse.Namespace) -> None:
     cwd = Path.cwd()
     if ns.force and not ns.init:
         fail("--force is only valid with --init")
@@ -199,6 +242,8 @@ def main(argv: list[str] | None = None) -> None:
         planned = _plan_release(current, ns, bump)
     except (AdapterError, PlanError) as exc:
         fail(str(exc))
+    except EOFError:
+        fail("no answer (stdin closed); run with --defaults to take each default")
 
     release_ver = planned.release.format()
     snapshot_ver = planned.next_snapshot.format()
@@ -220,6 +265,7 @@ def main(argv: list[str] | None = None) -> None:
     else:
         info("HOOKS: none")
 
+    summary = {"tool": cfg.tool, "artifact": artifact, "version": release_ver, "next_snapshot": snapshot_ver, "tags": tags}
     if ns.dry_run:
         run_hooks(cfg.hooks, "before", defaults=False, skip=False, dry_run=True, log=info, ask=input)
         preview_cfg_files = _preview_write(adapter, cwd, cfg, release_ver, artifact)
@@ -236,13 +282,21 @@ def main(argv: list[str] | None = None) -> None:
                 head = "HEAD"
             _post_push(cwd, cfg, release_ver, head, ns, dry_run=True)
         info("no files written")
+        problems = _preflight(tags)
+        if problems:
+            fail("dry-run: the release would stop before the hooks:\n- " + "\n- ".join(problems))
+        info("PREFLIGHT: ok (clean tree, tags free, up to date with origin)")
+        result(f"dry-run ok: {artifact} {release_ver} (tags {', '.join(tags)})")
+        emit({**summary, "ok": True, "dry_run": True, "files": sorted(preview_cfg_files)})
         return
 
-    _preflight_clean(tags, check_remote=True)
+    problems = _preflight(tags)
+    if problems:
+        fail("\n- ".join(["cannot release:", *problems]))
 
     start: gitops.RepoState | None = None
     tagged: list[str] = []
-    changed: list[Path] = []
+    pushing = False
     try:
         start = gitops.current_repo()
         run_hooks(
@@ -282,21 +336,31 @@ def main(argv: list[str] | None = None) -> None:
             scm_tag=_scm_for(cfg, artifact, release_ver, snapshot=True),
         )
         gitops.commit(rel_names, f"[manual-release] Prepare for next iteration ({snapshot_ver})")
+        pushing = True
         gitops.push_atomic(tags)
-    except HookError as exc:
-        if version_path.is_file():
-            version_path.write_text(original, encoding="utf-8")
-        fail(str(exc))
-    except (gitops.GitError, OSError, AdapterError) as exc:
-        if version_path.is_file():
-            version_path.write_text(original, encoding="utf-8")
-        if start is not None:
-            gitops.reset_hard(start.sha)
-        for tag in tagged:
-            gitops.delete_local_tag(tag)
-        fail(str(exc))
+    except BaseException as exc:
+        # A failed --atomic push leaves nothing on origin. Ctrl-C while pushing may not: never roll back then.
+        if pushing and isinstance(exc, KeyboardInterrupt):
+            on_origin = _on_origin(tags[0])
+            if on_origin:
+                fail(f"interrupted after the push: {release_ver} is released. run the connectors: release connectors run {release_ver}", 130)
+            if on_origin is None:
+                fail(
+                    f"interrupted during the push and origin cannot be checked; {tags[0]} may already be there, so nothing "
+                    "was rolled back. check `git ls-remote --tags origin`, then push or delete the local commits and tags",
+                    130,
+                )
+        _rollback(version_path, original, start, tagged)
+        if isinstance(exc, KeyboardInterrupt):
+            fail("interrupted; release rolled back (nothing was pushed to git)", 130)
+        if isinstance(exc, EOFError):
+            fail("no answer (stdin closed); rolled back. run with --defaults to take each default")
+        if isinstance(exc, (HookError, gitops.GitError, OSError, AdapterError, PromptError)):
+            fail(f"{exc} (rolled back; nothing was pushed to git)")
+        raise
 
-    info(_paint(GREEN, "RELEASE") + f" {artifact}-{release_ver} " + _paint(GREEN, "FINISHED!"))
+    result(_paint(GREEN, "RELEASE") + f" {artifact}-{release_ver} " + _paint(GREEN, "FINISHED!"))
+    summary["sha"] = gitops.tag_commit(release_ver)
     if planned.release.rc is None:
         nxt = planned.next_snapshot
         info(
@@ -307,35 +371,71 @@ def main(argv: list[str] | None = None) -> None:
     # Past the atomic push: nothing below may reset, delete, or move a tag.
     if ns.skip_connectors:
         info("connectors skipped (--skip-connectors)")
+        emit({**summary, "ok": True, "dry_run": False, "connectors": {}})
         return
-    if not _post_push(cwd, cfg, release_ver, gitops.tag_commit(release_ver), ns, dry_run=False):
-        fail(f"release {release_ver} is pushed and its tags stay; a connector did not finish (see above to resume)")
+    ok = _post_push(cwd, cfg, release_ver, summary["sha"], ns, dry_run=False)
+    saved = cx_state(cwd, release_ver)
+    if not ok:
+        fail(
+            f"release {release_ver} is pushed and its tags stay; a connector did not finish (see above to resume)",
+            pushed=True, connectors=saved, **summary,
+        )
+    emit({**summary, "ok": True, "dry_run": False, "connectors": saved})
+
+
+def _on_origin(tag: str) -> bool | None:
+    """True/False when origin answers, None when it cannot be checked."""
+    try:
+        return gitops.remote_tag_exists(tag)
+    except gitops.GitError:
+        return None
+
+
+def _rollback(version_path: Path, original: str, start: gitops.RepoState | None, tagged: list[str]) -> None:
+    """Undo everything local before the push: tags, release commits, the version file."""
+    for tag in tagged:
+        gitops.delete_local_tag(tag)
+    if start is not None:
+        try:
+            gitops.reset_hard(start.sha)
+            return
+        except gitops.GitError as exc:
+            print(f"rollback: git reset --hard {start.sha} failed: {exc}", file=sys.stderr)
+    if version_path.is_file():
+        version_path.write_text(original, encoding="utf-8")
+
+
+def cx_state(cwd: Path, release_ver: str) -> dict[str, str]:
+    """name -> status of each connector run saved for this release."""
+    state = cx.load_state(cx.repo_name(gitops.remote_url(), cwd), release_ver) or {}
+    return {name: entry.get("status") for name, entry in state.get("connectors", {}).items()}
 
 
 def _post_push(cwd: Path, cfg: Config, release_ver: str, sha: str, ns: argparse.Namespace, *, dry_run: bool) -> bool:
     try:
         return commands.post_push(cwd, cfg, release_ver, sha, defaults=ns.defaults, dry_run=dry_run)
     except (ChainInterrupted, KeyboardInterrupt):
-        info(f"interrupted. the tags stay pushed. see: release connectors status {release_ver}")
-        raise SystemExit(130)
+        fail(f"interrupted. the tags stay pushed. see: release connectors status {release_ver}", 130, pushed=True, version=release_ver)
     except (ConnectorError, ConfigError) as exc:
         fail(f"{exc} (release {release_ver} tags are not touched)")
-        return False
 
 
 def _preview_write(adapter, cwd: Path, cfg: Config, version: str, artifact: str) -> dict[str, tuple[str, str]]:
-    path = cwd / cfg.version_file
-    if not path.is_file():
+    """Write the release version, read every touched file, put everything back byte for byte."""
+    before = {path: path.read_bytes() for path in adapter.paths(cwd, cfg) if path.is_file()}
+    if not before:
         return {}
-    before = path.read_text(encoding="utf-8")
     try:
         adapter.write(cwd, cfg, version, scm_tag=_scm_for(cfg, artifact, version, snapshot=False))
-        after = path.read_text(encoding="utf-8")
+        after = {path: path.read_bytes() for path in before}
     finally:
-        path.write_text(before, encoding="utf-8")
-    if before == after:
-        return {}
-    return {cfg.version_file: (before, after)}
+        for path, data in before.items():
+            path.write_bytes(data)
+    return {
+        str(path.relative_to(cwd)): (before[path].decode("utf-8"), after[path].decode("utf-8"))
+        for path in before
+        if before[path] != after[path]
+    }
 
 
 if __name__ == "__main__":

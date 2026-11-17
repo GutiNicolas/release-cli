@@ -54,6 +54,8 @@ if action == "questions":
                 ],
             }
         )
+    if behavior == "int":
+        reply({"protocol": 1, "questions": [{"id": "retries", "type": "int", "prompt": "Retries", "persist": "project"}]})
     if behavior == "ok":
         reply({"protocol": 1, "questions": [{"id": "go", "type": "bool", "prompt": "Go?", "default": True}]})
     reply({"protocol": 1, "questions": [], "timeout_seconds": 1 if behavior == "slow-run" else 60})

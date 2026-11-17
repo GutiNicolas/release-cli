@@ -178,3 +178,189 @@ def test_log_lines_stay_in_order_with_connector_stderr_when_piped(repo: Path) ->
     ).stdout
     assert out.index("RELEASE example-app-1.5.0-rc0 FINISHED!") < out.index("CONNECTOR platform-build")
     assert out.index("CONNECTOR platform-build") < out.index("[platform-build] questions exploded")
+
+
+def test_rejected_commit_rolls_back_cleanly(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    hook = repo / ".git" / "hooks" / "pre-commit"
+    hook.write_text("#!/bin/sh\necho 'lint failed' >&2\nexit 1\n", encoding="utf-8")
+    hook.chmod(0o755)
+    head = git(repo, "rev-parse", "HEAD")
+    with pytest.raises(SystemExit) as exc:
+        main(["-rc", "--defaults"])
+    assert exc.value.code == 1
+    assert "lint failed" in capsys.readouterr().err
+    assert local_tags(repo) == set() and remote_tags(repo) == set()
+    assert git(repo, "rev-parse", "HEAD") == head
+    assert git(repo, "status", "--porcelain") == ""
+
+
+def test_ctrl_c_in_after_hook_restores_version_file(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from release_cli import hooks
+
+    def interrupted(_cmd: str) -> int:
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(hooks, "run_command", interrupted)
+    write_config(repo, hooks='[[hooks]]\nwhen = "after"\ncmd = "mvn deploy"\n')
+    with pytest.raises(SystemExit) as exc:
+        main(["-rc", "--defaults"])
+    assert exc.value.code == 130
+    assert git(repo, "status", "--porcelain") == ""
+    assert local_tags(repo) == set() and remote_tags(repo) == set()
+
+
+def test_ctrl_c_after_the_push_keeps_the_release(repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    real_push = gitops.push_atomic
+
+    def push_then_interrupt(tags: list[str]) -> None:
+        real_push(tags)
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(gitops, "push_atomic", push_then_interrupt)
+    with pytest.raises(SystemExit) as exc:
+        main(["-rc", "--defaults"])
+    assert exc.value.code == 130
+    assert remote_tags(repo) == set(TAGS) and local_tags(repo) == set(TAGS)
+    assert git(repo, "rev-parse", "HEAD") == git(repo, "rev-parse", "origin/main")
+    assert "release connectors run 1.5.0-rc0" in capsys.readouterr().err
+
+
+def test_branch_behind_origin_stops_before_any_hook(repo: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    other = tmp_path / "other"
+    git(tmp_path, "clone", str(tmp_path / "example-app.git"), str(other))
+    (other / "NOTES.md").write_text("from a teammate\n", encoding="utf-8")
+    git(other, "add", ".")
+    git(other, "commit", "-m", "teammate change")
+    git(other, "push", "origin", "main")
+    marker = tmp_path / "deployed"
+    write_config(repo, hooks=f'[[hooks]]\nwhen = "after"\ncmd = "touch {marker}"\n')
+    with pytest.raises(SystemExit) as exc:
+        main(["-rc", "--defaults"])
+    assert exc.value.code == 1
+    assert "1 commit(s) behind origin/main" in capsys.readouterr().err
+    assert not marker.exists()
+    assert local_tags(repo) == set() and remote_tags(repo) == set()
+
+
+def test_status_reports_open_rc_last_tag_and_origin(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    from release_cli import commands
+
+    install_fakes(("platform-build", "ok"))
+    main(["-rc", "--defaults"])
+    capsys.readouterr()
+    data = commands.status_data(repo, fetch=True)
+    assert data["version"] == "1.5.0-rc0-SNAPSHOT" and data["rc_open"]
+    assert data["last_tag"] == "1.5.0-rc0"
+    assert data["origin"] == {"behind": 0, "ahead": 0}
+    assert data["connectors"] == {"platform-build": "ok"}
+
+
+def test_undo_deletes_both_rc_tags_and_the_next_rc_moves_on(repo: Path) -> None:
+    from release_cli import commands
+
+    main(["-rc", "--defaults", "--skip-connectors"])
+    commands.undo(repo, "1.5.0-rc0", force=False, ask=lambda _p: "n")
+    assert remote_tags(repo) == set(TAGS)
+    commands.undo(repo, "example-app-1.5.0-rc0", force=False, ask=lambda _p: "y")
+    assert remote_tags(repo) == set() and local_tags(repo) == set()
+    main(["-rc", "--defaults", "--skip-connectors"])
+    assert remote_tags(repo) == {"1.5.0-rc1", "example-app-1.5.0-rc1"}
+
+
+def test_undo_refuses_a_final_release(repo: Path) -> None:
+    from release_cli import commands
+
+    main(["-rc", "--defaults", "--skip-connectors"])
+    main(["-fv", "--defaults", "--skip-connectors"])
+    with pytest.raises(connectors.ConnectorError, match="final release"):
+        commands.undo(repo, "1.5.0", force=True)
+    assert "1.5.0" in remote_tags(repo)
+
+
+def test_notes_lists_commits_since_previous_tag_without_release_commits(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    from release_cli import commands
+
+    main(["-rc", "--defaults", "--skip-connectors"])
+    (repo / "feature.txt").write_text("x\n", encoding="utf-8")
+    git(repo, "add", ".")
+    git(repo, "commit", "-m", "Add the feature")
+    main(["-rc", "--defaults", "--skip-connectors"])
+    capsys.readouterr()
+    commands.notes(repo, None)
+    out = capsys.readouterr().out
+    assert "Changes since 1.5.0-rc0" in out and "Add the feature" in out
+    assert "manual-release" not in out
+
+
+def _cli(repo: Path, *args: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [sys.executable, "-c", f"from release_cli.cli import main; main({list(args)!r})"],
+        cwd=repo, capture_output=True, text=True, check=False,
+        env={**os.environ, "PYTHONPATH": str(Path(__file__).resolve().parents[1])},
+    )
+
+
+def test_json_stdout_is_one_object_even_with_hook_output(repo: Path) -> None:
+    write_config(repo, hooks='[[hooks]]\nwhen = "before"\ncmd = "echo hook-noise"\n')
+    git(repo, "add", "-f", ".release")
+    git(repo, "commit", "-m", "config")
+    done = _cli(repo, "-rc", "--defaults", "--json", "--skip-connectors")
+    assert done.returncode == 0, done.stderr
+    data = json.loads(done.stdout)
+    assert data["ok"] and data["version"] == "1.5.0-rc0" and data["tags"] == list(TAGS)
+    assert "hook-noise" in done.stderr and "STARTING RELEASE" in done.stderr
+
+
+def test_json_failure_is_still_json(repo: Path) -> None:
+    (repo / ".gitignore").write_text(".release\nbuild/\n", encoding="utf-8")
+    done = _cli(repo, "-rc", "--defaults", "--json")
+    assert done.returncode == 1
+    data = json.loads(done.stdout)
+    assert data["ok"] is False and "working tree is not clean" in data["error"]
+
+
+def test_quiet_prints_only_the_result_line(repo: Path) -> None:
+    done = _cli(repo, "-rc", "--defaults", "--quiet", "--skip-connectors")
+    assert done.returncode == 0, done.stderr
+    assert done.stdout.strip() == "RELEASE example-app-1.5.0-rc0 FINISHED!"
+
+
+def test_quiet_still_shows_a_failed_connector_and_how_to_resume(repo: Path) -> None:
+    install_fakes(("platform-build", "fail"))
+    done = _cli(repo, "-rc", "--defaults", "--quiet")
+    assert done.returncode == 1
+    assert "platform-build: failed: FAILURE" in done.stderr
+    assert "resume: release connectors run 1.5.0-rc0 --from platform-build" in done.stderr
+    assert done.stdout.strip() == "RELEASE example-app-1.5.0-rc0 FINISHED!"
+
+
+def test_release_from_a_branch_origin_does_not_have_yet(repo: Path) -> None:
+    git(repo, "checkout", "-b", "release/next")
+    main(["-rc", "--defaults", "--skip-connectors"])
+    assert remote_tags(repo) == set(TAGS)
+    assert git(repo, "rev-parse", "HEAD") == git(repo, "ls-remote", "origin", "refs/heads/release/next").split()[0]
+
+
+def test_multi_module_release_bumps_child_parent_versions(repo: Path) -> None:
+    pom = repo / "pom.xml"
+    pom.write_text(
+        pom.read_text(encoding="utf-8").replace(
+            "<version>1.4.0-SNAPSHOT</version>",
+            "<version>1.4.0-SNAPSHOT</version>\n\t<packaging>pom</packaging>\n\t<modules>\n\t\t<module>core</module>\n\t</modules>",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    (repo / "core").mkdir()
+    (repo / "core" / "pom.xml").write_text(
+        "<project>\n  <parent>\n    <groupId>com.example</groupId>\n    <artifactId>example-app</artifactId>\n"
+        "    <version>1.4.0-SNAPSHOT</version>\n  </parent>\n  <artifactId>core</artifactId>\n</project>\n",
+        encoding="utf-8",
+    )
+    git(repo, "add", ".")
+    git(repo, "commit", "-m", "add core module")
+    git(repo, "push", "origin", "main")
+    main(["-rc", "--defaults", "--skip-connectors"])
+    assert git(repo, "status", "--porcelain") == ""
+    assert "<version>1.5.0-rc0</version>" in git(repo, "show", "1.5.0-rc0:core/pom.xml")
+    assert "<version>1.5.0-rc0-SNAPSHOT</version>" in (repo / "core" / "pom.xml").read_text(encoding="utf-8")

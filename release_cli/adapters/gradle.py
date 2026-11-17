@@ -96,8 +96,10 @@ class GradleAdapter:
                 return ProjectState(version=match.group(2), artifact=artifact, version_file=name)
         raise AdapterError("put version in gradle.properties (version=...) or root build.gradle(.kts)")
 
+    def paths(self, cwd: Path, cfg: Config) -> list[Path]:
+        return [cwd / cfg.version_file]
+
     def read(self, cwd: Path, cfg: Config) -> ProjectState:
-        discovered = self.discover(cwd)
         path = cwd / cfg.version_file
         if not path.is_file():
             raise AdapterError(f"{cfg.version_file} not found")
@@ -105,14 +107,14 @@ class GradleAdapter:
             hit = _properties_version_line(path.read_text(encoding="utf-8"))
             if not hit:
                 raise AdapterError("missing version= in gradle.properties")
-            return ProjectState(version=hit[1].group(2), artifact=cfg.artifact or discovered.artifact, version_file=cfg.version_file)
+            return ProjectState(version=hit[1].group(2), artifact=cfg.artifact, version_file=cfg.version_file)
         text = path.read_text(encoding="utf-8")
         found = _first_root_match(text, (_KTS_VERSION, _KTS_SET, _GROOVY_VERSION))
         if not found:
             raise AdapterError(f"missing root version in {cfg.version_file}")
         return ProjectState(
             version=found[1].group(2),
-            artifact=cfg.artifact or discovered.artifact,
+            artifact=cfg.artifact,
             version_file=cfg.version_file,
         )
 

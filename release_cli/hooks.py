@@ -6,6 +6,7 @@ import subprocess
 
 from release_cli import prompts
 from release_cli.config import Hook, When
+from release_cli.ui import child_stdout
 
 
 class HookError(RuntimeError):
@@ -13,7 +14,7 @@ class HookError(RuntimeError):
 
 
 def run_command(cmd: str) -> int:
-    return subprocess.run(cmd, shell=True, check=False).returncode
+    return subprocess.run(cmd, shell=True, check=False, stdout=child_stdout()).returncode
 
 
 def question(hook: Hook) -> str:

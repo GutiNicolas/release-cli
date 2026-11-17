@@ -50,3 +50,14 @@ def test_gradle_kts_root_version_skips_dependencies(tmp_path: Path) -> None:
     assert 'implementation("org.example:lib:1.4.0")' in text
     assert 'version = "1.5.0-rc0"' in text
     assert 'val version = "not-the-project"' in text
+
+
+def test_custom_version_file_is_read_and_written_without_default_locations(tmp_path: Path) -> None:
+    (tmp_path / "versions").mkdir()
+    target = tmp_path / "versions" / "app.gradle.kts"
+    target.write_text('version = "2.0.0-SNAPSHOT"\n', encoding="utf-8")
+    cfg = Config(tool="gradle", artifact="app", version_file="versions/app.gradle.kts")
+    adapter = GradleAdapter()
+    assert adapter.read(tmp_path, cfg).version == "2.0.0-SNAPSHOT"
+    adapter.write(tmp_path, cfg, "2.1.0-rc0")
+    assert target.read_text(encoding="utf-8") == 'version = "2.1.0-rc0"\n'
