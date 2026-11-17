@@ -32,6 +32,29 @@ def test_splice_does_not_touch_matching_dependency_versions() -> None:
     assert len(changed) == 2
 
 
+def test_project_tag_spanning_several_lines_keeps_line_numbers() -> None:
+    # Spring Initializr style: <project ...> attributes split across lines.
+    original = (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<project xmlns="http://maven.apache.org/POM/4.0.0"\n'
+        '         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"\n'
+        '         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 '
+        'https://maven.apache.org/xsd/maven-4.0.0.xsd">\n'
+        "  <parent>\n"
+        "    <version>4.1.1</version>\n"
+        "    <relativePath/>\n"
+        "  </parent>\n"
+        "  <groupId>com.example</groupId>\n"
+        "  <artifactId>demo</artifactId>\n"
+        "  <version>0.0.1-SNAPSHOT</version>\n"
+        "</project>\n"
+    )
+    updated = apply_version(original, "0.0.1-rc0", None)
+    assert "  <version>0.0.1-rc0</version>\n" in updated
+    assert "<version>4.1.1</version>" in updated
+    assert "<groupId>com.example</groupId>" in updated
+
+
 def test_next_snapshot_sets_scm_head() -> None:
     original = FIXTURE.read_text(encoding="utf-8")
     released = apply_version(original, "1.5.0-rc0", "example-app-1.5.0-rc0")
