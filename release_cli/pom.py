@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 import xml.etree.ElementTree as ET
+from collections.abc import Collection
 from dataclasses import dataclass
 
 
@@ -17,7 +18,6 @@ class PomFields:
     artifact_id: str
     scm_tag: str | None
     version_line: int
-    artifact_line: int
     scm_tag_line: int | None
 
 
@@ -67,7 +67,6 @@ def read_fields(xml: str) -> PomFields:
         artifact_id=_text(artifact_el) or "",
         scm_tag=scm_tag,
         version_line=lines["version"],
-        artifact_line=lines["artifactId"],
         scm_tag_line=lines.get("scm.tag"),
     )
 
@@ -128,6 +127,9 @@ def _project_child_lines(xml: str) -> dict[str, int]:
     return hits
 
 
+_PARENT_TAGS = ("groupId", "artifactId", "version")
+
+
 def _record(stack: list[str], name: str, line: int, hits: dict[str, int]) -> None:
     path = (*stack, name)
     if path == ("project", "version"):
@@ -136,6 +138,12 @@ def _record(stack: list[str], name: str, line: int, hits: dict[str, int]) -> Non
         hits.setdefault("artifactId", line)
     elif path == ("project", "scm", "tag"):
         hits.setdefault("scm.tag", line)
+    elif path == ("project", "groupId"):
+        hits.setdefault("groupId", line)
+    elif path[:2] == ("project", "parent") and len(path) == 3 and path[2] in _PARENT_TAGS:
+        hits.setdefault(f"parent.{path[2]}", line)
+    elif path == ("project", "modules", "module"):
+        hits[f"modules.module.{sum(k.startswith('modules.module.') for k in hits)}"] = line
 
 
 def splice(xml: str, line_no: int, tag: str, new_text: str) -> str:
@@ -160,4 +168,81 @@ def apply_version(xml: str, new_version: str, scm_tag: str | None) -> str:
     if scm_tag is not None and fields.scm_tag_line is not None:
         # Re-read line numbers from original; version splice does not shift lines.
         out = splice(out, fields.scm_tag_line, "tag", scm_tag)
+    return out
+
+
+@dataclass(frozen=True)
+class PomRefs:
+    """Lenient view of a pom used for multi-module rewrites (any field may be absent)."""
+
+    group_id: str | None  # own groupId, falling back to the parent's
+    artifact_id: str | None
+    version: str | None
+    parent_group_id: str | None
+    parent_artifact_id: str | None
+    parent_version: str | None
+    version_line: int | None
+    parent_version_line: int | None
+    modules: tuple[tuple[str, int], ...]  # (module path, 1-based line)
+
+
+def read_refs(xml: str) -> PomRefs:
+    try:
+        root = ET.fromstring(xml)
+    except ET.ParseError as exc:
+        raise PomError(f"invalid pom.xml: {exc}") from exc
+    if _local(root.tag) != "project":
+        raise PomError("pom.xml root is not <project>")
+    parent = _direct(root, "parent")
+
+    def val(el: ET.Element | None, name: str) -> str | None:
+        return _text(_direct(el, name)) if el is not None else None
+
+    lines = _project_child_lines(xml)
+    modules_el = _direct(root, "modules")
+    names = [
+        t
+        for m in (list(modules_el) if modules_el is not None else [])
+        if _local(m.tag) == "module" and (t := _text(m))
+    ]
+    module_lines = [lines[k] for k in lines if k.startswith("modules.module.")]
+    # Empty <module/> entries are skipped in names but still counted in lines; realign.
+    if len(names) != len(module_lines):
+        module_lines = (module_lines + [0] * len(names))[: len(names)]
+    own_group = val(root, "groupId")
+    return PomRefs(
+        group_id=own_group or val(parent, "groupId"),
+        artifact_id=val(root, "artifactId"),
+        version=val(root, "version"),
+        parent_group_id=val(parent, "groupId"),
+        parent_artifact_id=val(parent, "artifactId"),
+        parent_version=val(parent, "version"),
+        version_line=lines.get("version"),
+        parent_version_line=lines.get("parent.version"),
+        modules=tuple(zip(names, module_lines, strict=True)),
+    )
+
+
+def apply_child_version(
+    xml: str,
+    bumped_parents: Collection[tuple[str | None, str | None]],
+    old_version: str,
+    new_version: str,
+) -> str:
+    """Bump a child pom.
+
+    The parent version is spliced when the parent (groupId, artifactId) is one of
+    `bumped_parents` (the root and any module already moved to the new version) and
+    still equals `old_version`; the child's own version is spliced when it equals it.
+    """
+    refs = read_refs(xml)
+    out = xml
+    if (
+        refs.parent_version == old_version
+        and refs.parent_version_line is not None
+        and (refs.parent_group_id, refs.parent_artifact_id) in bumped_parents
+    ):
+        out = splice(out, refs.parent_version_line, "version", new_version)
+    if refs.version == old_version and refs.version_line is not None:
+        out = splice(out, refs.version_line, "version", new_version)
     return out

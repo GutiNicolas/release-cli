@@ -20,14 +20,22 @@ from pathlib import Path
 from typing import Any, Callable
 
 from release_cli import prompts
-from release_cli.config import CONNECTOR_LISTS, ConfigError, dump_toml, loads_toml, set_connector_value
+from release_cli.config import (
+    CONNECTOR_LISTS,
+    ConfigError,
+    dump_toml,
+    loads_toml,
+    set_connector_value,
+)
 
 PROTOCOL = 1
 QUESTIONS_TIMEOUT = 30.0
 DEFAULT_RUN_TIMEOUT = 3600.0
 STOP_GRACE = 10.0
 STDERR_TAIL = 20
-BUILTINS = {"cursor-review": "release_cli.cursor_review"}
+BUILTINS = {"cursor-review": "release_cli.cursor_review", "github-release": "release_cli.github_release"}
+# connectors.toml [connectors.<name>.config] written when a built-in is first added.
+BUILTIN_CONFIG: dict[str, dict[str, Any]] = {"cursor-review": {"slack_cloud": False, "delay_minutes": 10}}
 NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]*$")
 QUESTION_ID_RE = re.compile(r"^[A-Za-z0-9_]+$")
 STATUSES = ("ok", "failed", "interrupted")
@@ -400,15 +408,18 @@ def _stop(proc: subprocess.Popen[str], grace: float) -> None:
 
 
 def call(conn: Connector, action: str, request: dict[str, Any], *, timeout: float, grace: float, cwd: str | None = None) -> Call:
-    proc = subprocess.Popen(
-        [*conn.command, action],
-        stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        encoding="utf-8",
-        cwd=cwd,
-    )
+    try:
+        proc = subprocess.Popen(
+            [*conn.command, action],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+            cwd=cwd,
+        )
+    except OSError as exc:
+        raise ConnectorError(f"cannot start {conn.command[0]}: {exc.strerror or exc}") from exc
     out: list[str] = []
     tail: deque[str] = deque(maxlen=STDERR_TAIL)
 
@@ -471,7 +482,10 @@ def ask_questions(conn: Connector, request: dict[str, Any]) -> Questions:
 
 
 def run_connector(conn: Connector, request: dict[str, Any], timeout: float) -> Outcome:
-    got = call(conn, "run", request, timeout=timeout, grace=STOP_GRACE, cwd=request.get("repo_root"))
+    try:
+        got = call(conn, "run", request, timeout=timeout, grace=STOP_GRACE, cwd=request.get("repo_root"))
+    except ConnectorError as exc:
+        return Outcome(status="failed", error=str(exc))
     parsed: Outcome | None = None
     reason: str | None = None
     try:
@@ -543,6 +557,13 @@ def _missing(conn: Connector, q: Question, why: str) -> MissingAnswer:
 
 def _ask_one(conn: Connector, q: Question, default: Any, *, defaults: bool, ask: prompts.Ask) -> Any:
     """The answer, or None when an optional text/int was left empty."""
+    try:
+        return _ask_one_raw(conn, q, default, defaults=defaults, ask=ask)
+    except EOFError as exc:
+        raise MissingAnswer(f"no answer for {conn.name}.{q.id} (stdin closed); run from a terminal or with --defaults") from exc
+
+
+def _ask_one_raw(conn: Connector, q: Question, default: Any, *, defaults: bool, ask: prompts.Ask) -> Any:
     label = f"[{conn.name}] {q.prompt}"
     if q.type == "bool":
         return prompts.ask_bool(label, default, defaults=defaults, ask=ask)
@@ -578,6 +599,8 @@ def collect_answers(
             continue
         if q.persist == "project" and q.id in project_values:
             stored = project_values[q.id]
+            if q.type == "int" and isinstance(stored, str) and re.fullmatch(r"-?\d+", stored.strip()):
+                stored = project_values[q.id] = int(stored)  # `release edit config set` stores text; the question says int
             err = q.value_error(stored)
             if err is None:
                 answers[q.id] = stored
@@ -637,7 +660,10 @@ def load_state(repo: str, tag: str) -> dict[str, Any] | None:
     path = state_path(repo, tag)
     if not path.is_file():
         return None
-    return json.loads(path.read_text(encoding="utf-8"))
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise ConnectorError(f"{path} is not valid JSON ({exc.msg}); fix or delete it") from exc
 
 
 def save_state(state: dict[str, Any]) -> Path:
@@ -668,6 +694,7 @@ def run_chain(
     dry_run: bool,
     log: Callable[[str], None],
     ask: prompts.Ask = input,
+    alert: Callable[[str], None] | None = None,
 ) -> bool:
     """Ask every enabled connector, then run that chain. Returns False if any failed. Never touches git.
 
@@ -675,6 +702,7 @@ def run_chain(
     this invocation are not in it yet, so they must ask without that result and refuse at run time.
     """
     tag = context["release_version"]
+    alert = alert or log  # failures and resume hints; the CLI keeps them visible under --quiet
     saved: dict[str, Any] = state.setdefault("connectors", {})
     # name -> (request, answers, timeout, resume_job)
     ready: dict[str, tuple[dict[str, Any], dict[str, Any], float, str | None]] = {}
@@ -692,17 +720,18 @@ def run_chain(
         if outcome.job_id is None and outcome.status == "interrupted" and resume_job:
             outcome.job_id = resume_job
         saved[conn.name] = {**outcome.entry(), "updated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
-        save_state(state)
+        if not dry_run:  # a dry run must never replace a saved result that `--from` resumes from
+            save_state(state)
         if publish:
             prior[conn.name] = outcome.entry()
         if outcome.status == "ok":
             log(f"{conn.name}: ok")
             return False
         all_ok = False
-        log(f"{conn.name}: {outcome.status}: {outcome.error or 'no reason given'}")
+        alert(f"{conn.name}: {outcome.status}: {outcome.error or 'no reason given'}")
         if outcome.job_id:
-            log(f"  job_id: {outcome.job_id}")
-        log(f"  the tag {tag} stays pushed. resume: {resume_hint(tag, conn.name)}")
+            alert(f"  job_id: {outcome.job_id}")
+        alert(f"  the tag {tag} stays pushed. resume: {resume_hint(tag, conn.name)}")
         if outcome.ctrl_c:
             raise ChainInterrupted(conn.name)
         return outcome.status != "ok" and conn.break_on_error

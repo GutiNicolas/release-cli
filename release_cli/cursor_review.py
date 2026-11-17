@@ -186,6 +186,21 @@ def list_jobs(repo: str, tag: str | None = None) -> list[dict[str, Any]]:
     return [j for j in jobs if j]
 
 
+def cancel(repo: str, tag: str) -> bool:
+    """Stop the pending review of repo + tag. True when one was pending."""
+    path = job_path(repo, tag)
+    job = read_job(path)
+    if not job or not _active(job):
+        return False
+    if pid_alive(job.get("pid")):
+        try:
+            os.kill(job["pid"], signal.SIGTERM)
+        except OSError:
+            pass
+    write_job(path, {**job, "status": "cancelled", "finished_at": _iso(time.time())})
+    return True
+
+
 def _spawn(path: Path) -> int:
     log = path.with_suffix(".log").open("ab")
     proc = subprocess.Popen(
@@ -311,11 +326,6 @@ def deeplink_open_command(url: str) -> list[str] | None:
     if shutil.which("open"):
         return ["open", "-u", url]
     return None
-
-
-def app_open_command(job: dict[str, Any]) -> list[str] | None:
-    """The command that opens a prefilled Agent chat in the Cursor app. Never `agent` / `cursor-agent`."""
-    return deeplink_open_command(prompt_deeplink(deeplink_text(job)))
 
 
 def _handoff(job: dict[str, Any], run: Callable[..., Any], sleep: Callable[[float], None] = time.sleep) -> tuple[str, int]:

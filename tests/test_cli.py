@@ -18,8 +18,13 @@ def _maven_project(tmp_path: Path, xml: str | None = None) -> None:
     write_config(tmp_path)
 
 
-def test_paint_when_stderr_is_a_tty(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_paint_only_when_stdout_is_a_tty(monkeypatch: pytest.MonkeyPatch) -> None:
+    # info() prints to stdout: `release -rc > log` must not get ANSI codes because stderr is a terminal.
     monkeypatch.setattr(sys.stderr, "isatty", lambda: True)
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: False)
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    assert _paint("\033[0;32m", "STARTING RELEASE") == "STARTING RELEASE"
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
     monkeypatch.delenv("NO_COLOR", raising=False)
     painted = _paint("\033[0;32m", "STARTING RELEASE")
     assert "STARTING RELEASE" in painted
@@ -37,6 +42,7 @@ def test_dry_run_rc_does_not_write(tmp_path: Path, capsys: pytest.CaptureFixture
     _maven_project(tmp_path)
     before = (tmp_path / "pom.xml").read_text(encoding="utf-8")
     monkeypatch.chdir(tmp_path)
+    _clean_repo(monkeypatch)
     main(["-rc", "--dry-run"])
     assert (tmp_path / "pom.xml").read_text(encoding="utf-8") == before
     out = capsys.readouterr().out
@@ -44,6 +50,7 @@ def test_dry_run_rc_does_not_write(tmp_path: Path, capsys: pytest.CaptureFixture
     assert "DRY-RUN" in out
     assert "+ " in out
     assert "Would you like to run" not in out
+    assert '"ok"' not in out  # the JSON object is only for --json
 
 
 def test_fv_without_rc_exits(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -90,6 +97,7 @@ def test_explicit_version_overwrites_open_rc_when_confirmed(
 ) -> None:
     _open_rc(tmp_path)
     monkeypatch.chdir(tmp_path)
+    _clean_repo(monkeypatch)
     asked = _answer(monkeypatch, "y")
     main(["-rc", "2.93.0", "--dry-run"])
     assert asked == [
@@ -119,6 +127,8 @@ def _clean_repo(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(gitops, "porcelain", lambda: "")
     monkeypatch.setattr(gitops, "tag_exists_local", lambda _name: False)
     monkeypatch.setattr(gitops, "remote_tag_exists", lambda _name: False)
+    monkeypatch.setattr(gitops, "fetch_branch", lambda _branch: None)
+    monkeypatch.setattr(gitops, "behind", lambda _branch: 0)
 
 
 def test_dirty_tree_exits(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
@@ -165,6 +175,7 @@ def test_dry_run_prints_configured_hook(tmp_path: Path, capsys: pytest.CaptureFi
         hooks='[[hooks]]\nwhen = "after"\ncmd = "mvn deploy"\n',
     )
     monkeypatch.chdir(tmp_path)
+    _clean_repo(monkeypatch)
     main(["-rc", "--dry-run"])
     out = capsys.readouterr().out
     assert "HOOK after: mvn deploy" in out
@@ -182,5 +193,19 @@ def test_before_hook_failure_does_not_write(tmp_path: Path, monkeypatch: pytest.
     monkeypatch.setattr("release_cli.hooks.run_command", lambda _cmd: 1)
     before = (tmp_path / "pom.xml").read_text(encoding="utf-8")
     with pytest.raises(SystemExit):
-        main(["-rc", "-y"])
+        main(["-rc", "--defaults"])
     assert (tmp_path / "pom.xml").read_text(encoding="utf-8") == before
+
+
+def test_dry_run_reports_what_would_stop_the_release(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    _maven_project(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    _clean_repo(monkeypatch)
+    monkeypatch.setattr(gitops, "porcelain", lambda: " M README.md")
+    monkeypatch.setattr(gitops, "behind", lambda _branch: 2)
+    with pytest.raises(SystemExit) as exc:
+        main(["-rc", "--dry-run"])
+    assert exc.value.code == 1
+    err = capsys.readouterr().err
+    assert "working tree is not clean" in err and "2 commit(s) behind origin/main" in err
+    assert "1.4.0-SNAPSHOT" in (tmp_path / "pom.xml").read_text(encoding="utf-8")

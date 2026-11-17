@@ -60,8 +60,10 @@ class SbtAdapter:
                 return ProjectState(version=hit[1].group(2), artifact=artifact, version_file=path.name)
         raise AdapterError('put version := "x.y.z-SNAPSHOT" in version.sbt or build.sbt')
 
+    def paths(self, cwd: Path, cfg: Config) -> list[Path]:
+        return [cwd / cfg.version_file]
+
     def read(self, cwd: Path, cfg: Config) -> ProjectState:
-        discovered = self.discover(cwd)
         path = cwd / cfg.version_file
         if not path.is_file():
             raise AdapterError(f"{cfg.version_file} not found")
@@ -70,7 +72,7 @@ class SbtAdapter:
             raise AdapterError(f"missing version := in {cfg.version_file}")
         return ProjectState(
             version=hit[1].group(2),
-            artifact=cfg.artifact or discovered.artifact,
+            artifact=cfg.artifact,
             version_file=cfg.version_file,
         )
 
