@@ -28,7 +28,7 @@ def test_splice_does_not_touch_matching_dependency_versions() -> None:
 
     original_lines = original.splitlines()
     updated_lines = updated.splitlines()
-    changed = [i for i, (a, b) in enumerate(zip(original_lines, updated_lines)) if a != b]
+    changed = [i for i, (a, b) in enumerate(zip(original_lines, updated_lines, strict=True)) if a != b]
     assert len(changed) == 2
 
 

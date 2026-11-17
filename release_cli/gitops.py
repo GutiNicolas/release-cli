@@ -1,4 +1,4 @@
-"""Git helpers. All subprocesses go through `run` so tests can mock them."""
+"""Git helpers. All subprocesses go through `run` so tests can mock them; failures raise GitError."""
 
 from __future__ import annotations
 
@@ -57,12 +57,12 @@ def remote_tag_exists(name: str) -> bool:
 
 
 def commit(paths: list[str], message: str) -> None:
-    run(["git", "add", "--", *paths])
-    run(["git", "commit", "-m", message])
+    _out(["git", "add", "--", *paths])
+    _out(["git", "commit", "-m", message])
 
 
 def annotate_tag(name: str, message: str) -> None:
-    run(["git", "tag", "-a", name, "-m", message])
+    _out(["git", "tag", "-a", name, "-m", message])
 
 
 def delete_local_tag(name: str) -> None:
@@ -70,7 +70,7 @@ def delete_local_tag(name: str) -> None:
 
 
 def reset_hard(sha: str) -> None:
-    run(["git", "reset", "--hard", sha])
+    _out(["git", "reset", "--hard", sha])
 
 
 def tag_commit(name: str) -> str:
@@ -86,14 +86,39 @@ def remote_url() -> str:
     return result.stdout.strip() if result.returncode == 0 else ""
 
 
-def toplevel() -> str:
-    return _out(["git", "rev-parse", "--show-toplevel"])
+def fetch_branch(branch: str) -> None:
+    """Update origin/<branch>. A branch that origin does not have yet is fine (the push creates it)."""
+    probe = run(["git", "ls-remote", "--exit-code", "--heads", "origin", f"refs/heads/{branch}"], check=False)
+    if probe.returncode == 2:  # origin is reachable and has no such branch
+        return
+    if probe.returncode != 0:
+        raise GitError((probe.stderr or "git ls-remote origin failed").strip())
+    _out(["git", "fetch", "--quiet", "--no-tags", "origin", branch])
+
+
+def behind(branch: str) -> int:
+    """Commits on origin/<branch> that HEAD does not have (0 when origin has no such branch)."""
+    ref = f"refs/remotes/origin/{branch}"
+    if run(["git", "rev-parse", "--verify", "--quiet", ref], check=False).returncode != 0:
+        return 0
+    return int(_out(["git", "rev-list", "--count", f"HEAD..{ref}"]))
+
+
+def ahead(branch: str) -> int:
+    """Commits on HEAD that origin/<branch> does not have (all of them when origin has no such branch)."""
+    ref = f"refs/remotes/origin/{branch}"
+    if run(["git", "rev-parse", "--verify", "--quiet", ref], check=False).returncode != 0:
+        return int(_out(["git", "rev-list", "--count", "HEAD"]))
+    return int(_out(["git", "rev-list", "--count", f"{ref}..HEAD"]))
+
+
+def tags() -> list[str]:
+    return _out(["git", "tag", "--list"]).split()
+
+
+def delete_remote_tags(names: list[str]) -> None:
+    _out(["git", "push", "--atomic", "origin", "--delete", *(f"refs/tags/{name}" for name in names)])
 
 
 def push_atomic(tags: list[str]) -> None:
-    args = ["git", "push", "--atomic", "origin", "HEAD", *tags]
-    try:
-        run(args)
-    except subprocess.CalledProcessError as exc:
-        err = (exc.stderr or exc.stdout or "").strip()
-        raise GitError(err or "git push --atomic failed") from exc
+    _out(["git", "push", "--atomic", "origin", "HEAD", *tags])

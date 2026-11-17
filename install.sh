@@ -12,28 +12,6 @@ fi
 ROOT=$(CDPATH= cd -- "$(dirname "$0")" && pwd)
 uv tool install --force "$ROOT"
 
-comment_alias() {
-    rcfile=$1
-    [ -f "$rcfile" ] || return 0
-    if grep -q "alias release=" "$rcfile" 2>/dev/null; then
-        tmp="${rcfile}.release-cli.tmp"
-        awk '
-            /^[[:space:]]*alias release=/ && !seen {
-                print "# release-cli: disabled old alias; command is now on PATH"
-                print "# " $0
-                seen=1
-                next
-            }
-            { print }
-        ' "$rcfile" > "$tmp"
-        mv "$tmp" "$rcfile"
-        printf '%s\n' "Commented alias release= in $rcfile"
-    fi
-}
-
-comment_alias "${ZDOTDIR:-$HOME}/.zshrc"
-comment_alias "$HOME/.bashrc"
-
 bin=$(command -v release || true)
 if [ -z "$bin" ]; then
     printf '%s\n' "Installed, but 'release' is not on PATH." >&2

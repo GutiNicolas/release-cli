@@ -14,13 +14,23 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
+from release_cli import adapters, cursor_review, github_release, gitops, prompts, update
 from release_cli import connectors as cx
-from release_cli import cursor_review, gitops, prompts, update
-from release_cli.config import LOCAL_NAME, TEAM_NAME, Config, ConfigError, load, load_layers, set_connector_value, update_file
-from release_cli.ui import fail, info, warn
+from release_cli.adapters.base import AdapterError
+from release_cli.config import (
+    LOCAL_NAME,
+    TEAM_NAME,
+    Config,
+    ConfigError,
+    load,
+    load_layers,
+    set_connector_value,
+    update_file,
+)
+from release_cli.ui import alert, fail, info, warn
 from release_cli.versioning import PlanError, parse
 
-COMMANDS = ("connector", "connectors", "hook", "edit", "update")
+COMMANDS = ("connector", "connectors", "hook", "edit", "update", "status", "undo", "notes")
 GITHUB_URL = re.compile(r"^(https://[^/@\s]+/[^/@\s]+/[^/@\s]+?)(?:\.git)?/?(?:@(\S+))?$")
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 SLACK_WARNING = (
@@ -53,8 +63,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     connector = sub.add_parser("connector", help="install and manage connectors (global, ~/.config/release/connectors.toml)")
     csub = connector.add_subparsers(dest="action", required=True)
-    add = csub.add_parser("add", help="install from a GitHub URL (pin with @ref) or add the built-in cursor-review")
-    add.add_argument("target", help="https://github.com/org/repo[@ref] or cursor-review")
+    add = csub.add_parser("add", help="install from a GitHub URL (pin with @ref) or add a built-in (cursor-review, github-release)")
+    add.add_argument("target", help="https://github.com/org/repo[@ref], cursor-review, or github-release")
     _defaults_flag(add)
     csub.add_parser("ls", help="list installed connectors, order, and installed SHA")
     update = csub.add_parser("update", help="reinstall a connector from its source (explicit; never during a release)")
@@ -89,11 +99,23 @@ def build_parser() -> argparse.ArgumentParser:
         "update",
         help="pull the release-cli clone and reinstall it (from any directory); asks only new config keys",
         description="Pull the release-cli clone (source.toml or the uv receipt), reinstall with uv, ask only new or "
-        "changed global config keys. Never updates connectors, connectors.toml, or project .release files.",
+        "changed global config keys. Built-in connectors update with it; connectors installed from a URL stay on "
+        "their SHA. Never rewrites connectors.toml or project .release files.",
     )
     _defaults_flag(upd)
     upd.add_argument("--config-only", action="store_true", help=argparse.SUPPRESS)
     upd.add_argument("--after-install", metavar="CLONE", help=argparse.SUPPRESS)
+
+    st = sub.add_parser("status", help="version, open RC, last tag, branch vs origin, and the last tag's connectors")
+    st.add_argument("--json", action="store_true", help="print one JSON object")
+    st.add_argument("--no-fetch", action="store_true", help="compare with origin as last fetched")
+
+    undo = sub.add_parser("undo", help="delete a pushed release candidate's tags (origin and local) after confirming")
+    undo.add_argument("tag", help="X.Y.Z-rcN or <artifact>-X.Y.Z-rcN")
+    undo.add_argument("--force", action="store_true", help="do not ask for confirmation")
+
+    notes = sub.add_parser("notes", help="release notes (markdown) from the commits since the previous tag")
+    notes.add_argument("tag", nargs="?", help="default: the latest version tag")
 
     edit = sub.add_parser("edit", help="edit hooks, connectors, order, and connector config (interactive without args)")
     edit.add_argument("words", nargs=argparse.REMAINDER, help="one editor command, e.g. `config set platform-deploy jira_project_key DEMO`")
@@ -113,12 +135,20 @@ def main(argv: list[str]) -> None:
                 connectors_status(ns.tag)
         elif ns.command == "update":
             update_command(ns)
+        elif ns.command == "status":
+            status(Path.cwd(), as_json=ns.json, fetch=not ns.no_fetch)
+        elif ns.command == "undo":
+            undo(Path.cwd(), ns.tag, force=ns.force)
+        elif ns.command == "notes":
+            notes(Path.cwd(), ns.tag)
         elif ns.command == "hook":
             hook_add(Path.cwd(), when=ns.when, cmd=ns.cmd, url=ns.url, default=ns.default == "y", team=ns.team)
         else:
             edit(Path.cwd(), ns.words)
     except (cx.ConnectorError, ConfigError, gitops.GitError, prompts.PromptError, update.UpdateError) as exc:
         fail(str(exc))
+    except EOFError:
+        fail("no answer (stdin closed); run from a terminal or with --defaults")
 
 
 # ---------- update ----------
@@ -241,8 +271,8 @@ def connector_add(target: str, *, defaults: bool, ask: prompts.Ask = input) -> N
     g = cx.load_global()
     if target in cx.BUILTINS:
         base: dict[str, Any] = {"builtin": True}
-        if target not in g["connectors"]:
-            base["config"] = {"slack_cloud": False, "delay_minutes": 10}
+        if target not in g["connectors"] and target in cx.BUILTIN_CONFIG:
+            base["config"] = dict(cx.BUILTIN_CONFIG[target])
         register(g, [target], base, break_default=False, defaults=defaults, ask=ask)
         cx.save_global(g)
         info(f"{target}: built in, order {g['order'].index(target) + 1}")
@@ -268,7 +298,10 @@ def connector_update(name: str, *, defaults: bool) -> None:
     entry = cx.load_global()["connectors"].get(name)
     if entry is None:
         raise cx.ConnectorError(f"unknown connector {name!r}")
-    if entry.get("builtin") or not entry.get("source"):
+    if entry.get("builtin"):
+        info(f"{name} is built in; it updates with `release update`")
+        return
+    if not entry.get("source"):
         info(f"{name} is not installed from a URL; nothing to update")
         return
     connector_add(entry["source"] + (f"@{entry['ref']}" if entry.get("ref") else ""), defaults=defaults)
@@ -357,7 +390,7 @@ def post_push(
         prior = _prior_from(saved, names[:idx])
     return cx.run_chain(
         context, selected, state=state, prior=prior, cwd=cwd, project=dict(cfg.connectors),
-        defaults=defaults, dry_run=dry_run, log=info, ask=ask,
+        defaults=defaults, dry_run=dry_run, log=info, ask=ask, alert=alert,
     )
 
 
@@ -392,7 +425,7 @@ def connectors_run(tag: str, *, start: str | None, only: str | None, defaults: b
         ok = post_push(cwd, cfg, version, gitops.tag_commit(tag), defaults=defaults, dry_run=dry_run, start=start, only=only)
     except (cx.ChainInterrupted, KeyboardInterrupt):
         info(f"interrupted. the tag stays. see: release connectors status {version}")
-        raise SystemExit(130)
+        raise SystemExit(130) from None
     if not ok:
         fail(f"a connector did not finish for {version}; the tag stays. see: release connectors status {version}")
 
@@ -416,6 +449,101 @@ def connectors_status(tag: str) -> None:
     for job in cursor_review.list_jobs(repo, version):
         alive = "alive" if cursor_review.pid_alive(job.get("pid")) else "not running"
         info(f"  review job: {job['status']} target {job['target_at']} pid {job.get('pid')} ({alive}) output {job['output']}")
+
+
+# ---------- status / undo / notes ----------
+
+
+def status_data(cwd: Path, *, fetch: bool) -> dict[str, Any]:
+    cfg = _require_project(cwd)
+    try:
+        version = adapters.get(cfg.tool).read(cwd, cfg).version
+        current = parse(version)
+    except (AdapterError, PlanError) as exc:
+        raise ConfigError(str(exc)) from exc
+    repo = gitops.current_repo()
+    data: dict[str, Any] = {
+        "tool": cfg.tool,
+        "artifact": cfg.artifact,
+        "version": version,
+        "rc_open": current.rc is not None,
+        "branch": repo.branch,
+        "dirty": bool(gitops.porcelain()),
+        "origin": None,
+        "last_tag": github_release.latest_tag(gitops.tags()),
+        "connectors": {},
+    }
+    try:
+        if fetch:
+            gitops.fetch_branch(repo.branch)
+        data["origin"] = {"behind": gitops.behind(repo.branch), "ahead": gitops.ahead(repo.branch)}
+    except gitops.GitError as exc:
+        data["origin"] = {"error": str(exc)}
+    if data["last_tag"]:
+        state = cx.load_state(cx.repo_name(gitops.remote_url(), cwd), data["last_tag"]) or {}
+        data["connectors"] = {name: entry.get("status") for name, entry in state.get("connectors", {}).items()}
+    return data
+
+
+def status(cwd: Path, *, as_json: bool, fetch: bool) -> None:
+    data = status_data(cwd, fetch=fetch)
+    if as_json:
+        print(json.dumps(data, indent=2))
+        return
+    origin = data["origin"]
+    if "error" in origin:
+        sync = f"origin unreachable ({origin['error']})"
+    elif origin["behind"]:
+        sync = f"{origin['behind']} behind, {origin['ahead']} ahead of origin: pull before releasing"
+    else:
+        sync = f"up to date with origin ({origin['ahead']} ahead)" if origin["ahead"] else "up to date with origin"
+    info(f"{data['artifact']} ({data['tool']}) {data['version']}")
+    info(f"release candidate open: {'yes (release -rc increments it, release -fv finalizes)' if data['rc_open'] else 'no'}")
+    info(f"branch: {data['branch']}{' (uncommitted changes)' if data['dirty'] else ''}, {sync}")
+    info(f"last tag: {data['last_tag'] or 'none'}")
+    for name, state in data["connectors"].items():
+        info(f"  {name}: {state}")
+
+
+def undo(cwd: Path, tag: str, *, force: bool, ask: prompts.Ask = input) -> None:
+    """Delete a pushed RC's two tags. The version commits stay: the next `release -rc` takes the next number."""
+    cfg = _require_project(cwd)
+    version = release_version_of(tag, cfg.artifact)
+    if parse(version).rc is None:
+        raise cx.ConnectorError(f"{version} is a final release; only release candidates can be undone")
+    gitops.current_repo()
+    tags = [version, f"{cfg.artifact}-{version}"]
+    remote = [t for t in tags if gitops.remote_tag_exists(t)]
+    local = [t for t in tags if gitops.tag_exists_local(t)]
+    if not remote and not local:
+        raise cx.ConnectorError(f"no tags {', '.join(tags)} on origin or locally")
+    info(f"undo {version}: delete {', '.join(remote) or 'nothing'} on origin and {', '.join(local) or 'nothing'} locally")
+    info("the version commits stay; the next `release -rc` creates the next candidate number")
+    if not force and not prompts.ask_bool(f"Delete the tags of {version}? This cannot be undone", False, ask=ask):
+        info("nothing deleted")
+        return
+    if remote:
+        gitops.delete_remote_tags(remote)
+    for name in local:
+        gitops.delete_local_tag(name)
+    repo = cx.repo_name(gitops.remote_url(), cwd)
+    if cursor_review.cancel(repo, version):
+        info("cancelled the pending cursor-review")
+    cx.state_path(repo, version).unlink(missing_ok=True)
+    info(f"deleted the tags of {version}. if a GitHub Release or a deploy was made from it, remove that too (e.g. gh release delete {version})")
+
+
+def notes(cwd: Path, tag: str | None) -> None:
+    cfg = load(cwd)
+    if tag is None:
+        tag = github_release.latest_tag(gitops.tags())
+        if tag is None:
+            raise cx.ConnectorError("no version tags yet")
+    version = release_version_of(tag, cfg.artifact) if cfg else tag
+    try:
+        print(github_release.release_notes(cwd, version))
+    except github_release.NotesError as exc:
+        raise cx.ConnectorError(str(exc)) from exc
 
 
 # ---------- hooks ----------
@@ -620,7 +748,10 @@ def _global_set(name: str, key: str, value: Any) -> None:
     if name not in g["connectors"]:
         raise cx.ConnectorError(f"unknown connector {name!r}")
     if key == "timeout_seconds":
-        g["connectors"][name][key] = float(value)
+        try:
+            g["connectors"][name][key] = float(value)
+        except ValueError as exc:
+            raise ConfigError(f"timeout_seconds must be a number of seconds, got {value!r}") from exc
     else:
         g["connectors"][name].setdefault("config", {})[key] = value
     cx.save_global(g)
@@ -645,5 +776,6 @@ def edit(cwd: Path, words: list[str], *, ask: prompts.Ask = input) -> None:
             continue
         try:
             edit_command(cwd, shlex.split(line), ask=ask)
-        except (ConfigError, cx.ConnectorError) as exc:
+        except (ValueError, cx.ConnectorError, prompts.PromptError, gitops.GitError) as exc:
+            # ValueError covers ConfigError and an unbalanced quote from shlex.
             print(f"error: {exc}", file=sys.stderr)
