@@ -21,9 +21,10 @@ chmod +x install.sh
 ```sh
 release update              # git pull in the clone + uv tool install --force; prints old -> new version
 release update --defaults   # accept the default of any new config key without asking
+release --version           # installed version
 ```
 
-`release update` needs the clone to be clean (it stops before pulling otherwise). Existing config is kept: only a global key this version adds, or one whose meaning changed, is asked once, and `config_version` is saved in `~/.config/release/release.toml`. It never updates connectors (`release connector update <name>`), never rewrites `connectors.toml`, and never touches a project's `.release`. Without `source.toml` it falls back to uv's install receipt; with neither, it tells you how to reinstall.
+`release update` needs the clone to be clean (it stops before pulling otherwise). Existing config is kept: only a global key this version adds, or one whose meaning changed, is asked once, and `config_version` is saved in `~/.config/release/release.toml`. Built-in connectors such as `cursor-review` update with the CLI. Connectors installed from a URL stay on their SHA (`release connector update <name>`). It never rewrites `connectors.toml`, and never touches a project's `.release`. Without `source.toml` it falls back to uv's install receipt; with neither, it tells you how to reinstall.
 
 If `release` is not found:
 
@@ -64,7 +65,11 @@ Re-run detection with `release --init --force`. `--init` never creates a release
 
 ### Gradle version location
 
-Put the project version in `gradle.properties` (`version=…`) or as a top-level `version = "…"` / `version.set("…")` in the root `build.gradle` / `build.gradle.kts`.
+Put the project version in `gradle.properties` (`version=…`) or as a top-level `version = "…"` / `version.set("…")` in the root `build.gradle` / `build.gradle.kts`. Another file works too if you set `version_file` in `.release`.
+
+### Maven multi-module
+
+The root `pom.xml` holds the version. Every module listed under `<modules>` (recursively; a directory with a `pom.xml` or a path to an `.xml` file) gets its `<parent><version>` bumped when that parent is the root or another module of the same build and it still has the old version. A module's own `<version>` is bumped only when it equals the old one. Modules whose parent is another project (e.g. `spring-boot-starter-parent`) are not touched, and missing module folders are skipped. `--dry-run` shows the diff of every pom.
 
 ## Versioning
 
@@ -114,9 +119,9 @@ Would you like to run [mvn test] before releasing? (y/n) [y]:
 Would you like to run [mvn deploy] after setting version? (y/n) [y]:
 ```
 
-`n` skips that hook for this run. Enter takes the hook's default (`y` unless the hook has `default = false`). `--dry-run` prints the plan and does not write or run hooks. `--skip-hooks` skips every hook (not connectors).
+`n` skips that hook for this run. Enter takes the hook's default (`y` unless the hook has `default = false`). `--dry-run` prints the plan, the diff of every file it would change, and the connector questions, writes nothing and runs no hooks. It then runs the same checks as a real release (clean tree, tags free locally and on origin, branch not behind origin) and exits 1 if one fails, so it works as a CI gate. `--skip-hooks` skips every hook (not connectors).
 
-`--defaults` takes the configured default on every hook, connector, and `--init` question. It does not assume yes: a hook or connector question whose default is `n` stays `n`. `-y` / `--yes` still work for one more version as a deprecated alias of `--defaults` and print a warning.
+`--defaults` takes the configured default on every hook, connector, and `--init` question. It does not assume yes: a hook or connector question whose default is `n` stays `n`.
 
 Add or change hooks without editing TOML:
 
@@ -140,8 +145,9 @@ release edit                                                        # add, remov
 release connector add https://github.com/example/release-connector          # latest
 release connector add https://github.com/example/release-connector@v0.1.0   # pinned
 release connector add cursor-review                                                         # built in
+release connector add github-release                                                        # built in
 release connector ls        # order, enabled, break_on_error, installed commit SHA
-release connector update platform-build     # explicit; a release never updates connectors
+release connector update platform-build     # explicit; only a connector installed from a URL
 release connector remove platform-deploy
 ```
 
@@ -196,6 +202,10 @@ Where it opens is `surface`, asked the first time you enable cursor-review (inst
 
 Settings: `release edit` then `global set cursor-review <key> <value>` for `delay_minutes`, `notify`, `surface` (`agents` or `classic`), `open_folder`, `cursor_bin`, `slack_cloud` (off), `cloud_command`. `slack_cloud` sends the review to a Cursor Cloud Agent instead, which is the only way to get the Slack DM; it runs in the cloud, so that agent needs the same integrations to see the errors, and `cloud_command` must be the command that starts it.
 
+### github-release
+
+Optional, built in: `release connector add github-release`. After the push it creates the GitHub Release of the tag with the [GitHub CLI](https://cli.github.com/) (`gh`, installed and logged in with `gh auth login`). Release candidates are marked as pre-releases. The notes are the commits since the previous tag (for a final, since the previous final), without the CLI's own `[manual-release]` commits; `release notes <tag>` prints the same text. It asks once per release (default yes), skips repositories whose `origin` is not on github.com, and on a resume reuses a release that already exists instead of creating a second one.
+
 ### Writing a connector
 
 A connector is a `release.connectors` entry point pointing at a zero-arg callable. release-cli runs it in a subprocess with the action (`questions` or `run`) as `argv[1]`, one JSON request on stdin, and expects one JSON object on stdout. Logs go to stderr and are shown live.
@@ -207,9 +217,26 @@ A connector is a `release.connectors` entry point pointing at a zero-arg callabl
 
 The built-in [`release_cli/cursor_review.py`](release_cli/cursor_review.py) is a small complete example; [`release_cli/connectors.py`](release_cli/connectors.py) has the exact validation.
 
+## Status, undo, notes
+
+```sh
+release status              # version, open RC, last tag, branch vs origin, the last tag's connectors
+release status --json       # the same as one JSON object (--no-fetch skips the fetch)
+release notes [tag]         # markdown notes since the previous tag (default: the latest tag)
+release undo 2.75.0-rc1     # deletes that RC's two tags on origin and locally, after asking (--force skips)
+```
+
+`release undo` only takes release candidates: a final may already be used by someone. It does not rewrite history. The version commits stay, so the next `release -rc` creates the next number (`rc2`). It cancels a pending cursor-review of that tag and forgets its saved connector runs. A GitHub Release or a deploy made from the tag is not undone; remove it yourself (`gh release delete <tag>`).
+
+## CI and scripts
+
+- `--json`: stdout carries exactly one JSON object, also on errors (`{"ok": false, "error": ..., "exit_code": ...}`). Progress, prompts, and hook output go to stderr. On success: `tool`, `artifact`, `version`, `next_snapshot`, `tags`, `sha`, `connectors` (name → status); with `--dry-run`, `files` instead of `sha`.
+- `--quiet` / `-q`: only the result line (`RELEASE <artifact>-<version> FINISHED!`) and errors. Hook output goes to stderr.
+- Combine with `--defaults` so nothing waits for an answer. The exit code is 0 on success, 1 on failure, 130 on Ctrl-C.
+
 ## Git
 
-The working tree must be clean and the tags must not already exist. Commits and tags are pushed with a single `git push --atomic`. If a hook, the version write, a commit, or the push fails, version files are restored, unpushed local commits are reset, and local tags are deleted. After the push nothing is rolled back.
+Before any hook runs, the release checks that the working tree is clean, the tags do not exist locally or on `origin`, and the branch is not behind `origin` (it fetches first). Otherwise an `after` hook such as `mvn deploy` could publish and then the push would be rejected. Commits and tags are pushed with a single `git push --atomic`. If a hook, the version write, a commit, or the push fails, or you press Ctrl-C before the push, the version files are restored, unpushed local commits are reset, and local tags are deleted. A Ctrl-C during the push checks `origin`: if the tag is there, the release stands. After the push nothing is rolled back.
 
 ## License
 

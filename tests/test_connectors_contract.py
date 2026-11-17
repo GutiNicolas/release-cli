@@ -238,7 +238,10 @@ def test_dry_run_shows_questions_and_never_calls_run(project: Path, capsys: pyte
     assert "a" not in load(project).connectors
 
 
-def test_release_dry_run_lists_connector_questions(project: Path, capsys: pytest.CaptureFixture[str]) -> None:
+def test_release_dry_run_lists_connector_questions(project: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch) -> None:
+    from tests.test_cli import _clean_repo
+
+    _clean_repo(monkeypatch)
     install_fakes(("a", "ok"))
     main(["-rc", "--dry-run"])
     assert "? Go? (y/n) [y]" in capsys.readouterr().out
@@ -247,15 +250,43 @@ def test_release_dry_run_lists_connector_questions(project: Path, capsys: pytest
     assert "CONNECTOR a" not in capsys.readouterr().out
 
 
-@pytest.mark.parametrize("flag", ["-y", "--yes"])
-def test_yes_is_deprecated_alias_of_defaults(project: Path, flag: str, capsys: pytest.CaptureFixture[str]) -> None:
-    main(["-rc", "--dry-run", flag])
-    assert "deprecated; use --defaults" in capsys.readouterr().err
+def test_dry_run_never_saves_connector_state(project: Path) -> None:
+    install_fakes(("a", "questions-exit"))
+    ok, state = run(project, dry_run=True)
+    assert not ok
+    assert state == {}
 
 
-def test_yes_on_init_warns_and_takes_defaults(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
-    (tmp_path / "pom.xml").write_text(POM.read_text(encoding="utf-8"), encoding="utf-8")
-    monkeypatch.chdir(tmp_path)
-    main(["--init", "-y"])
-    assert "deprecated" in capsys.readouterr().err
-    assert (tmp_path / ".release").is_file()
+def test_int_answer_set_with_edit_is_accepted_under_defaults(project: Path) -> None:
+    install_fakes(("a", "int"))
+    commands.edit(project, ["config", "set", "a", "retries", "3"])
+    ok, state = run(project, defaults=True)
+    assert ok, state
+    assert state["a"]["result"]["answers"] == {"retries": 3}
+
+
+def test_connector_that_cannot_start_is_recorded_failed(project: Path) -> None:
+    connectors.save_global({"order": ["a"], "connectors": {"a": {"command": [str(project / "missing-python")], "enabled": True}}})
+    ok, state = run(project)
+    assert not ok
+    assert state["a"]["status"] == "failed" and "missing-python" in state["a"]["error"]
+
+
+def test_closed_stdin_after_the_push_records_a_resumable_failure(project: Path) -> None:
+    install_fakes(("a", "ok"))
+    cfg = load(project)
+
+    def closed(_prompt: str) -> str:
+        raise EOFError
+
+    ok = commands.post_push(project, cfg, "1.5.0-rc0", "abc123", defaults=False, dry_run=False, ask=closed)
+    state = connectors.load_state(project.name, "1.5.0-rc0")["connectors"]
+    assert not ok
+    assert state["a"]["status"] == "failed" and "stdin closed" in state["a"]["error"]
+
+
+def test_builtin_github_release_runs_in_the_chain_and_skips_non_github(project: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    commands.connector_add("github-release", defaults=True)
+    ok, state = run(project)
+    assert ok and state == {}
+    assert "skipping github-release: does not apply to this project: the remote is not on github.com" in capsys.readouterr().out

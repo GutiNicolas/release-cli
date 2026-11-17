@@ -1,6 +1,7 @@
 """`release update`: pull the release-cli clone, reinstall it with uv, ask only new or changed config keys.
 
-Never touches connectors (they stay on their SHA), connectors.toml, or any project .release.
+Never moves connectors installed from a URL (they stay on their SHA), never rewrites connectors.toml,
+and never touches a project .release. Built-in connectors ship inside release-cli, so reinstalling updates them.
 """
 
 from __future__ import annotations
@@ -266,4 +267,20 @@ def update(*, defaults: bool, log: Callable[[str], None] = print) -> None:
     log(f"release-cli {old_version} ({old_sha}) -> {_pyproject_version(src.path)} ({new_sha})")
     if old_sha == new_sha:
         log("already up to date; reinstalled")
-    log("connectors were not updated; use `release connector update <name>`")
+    for line in connector_notes():
+        log(line)
+
+
+def connector_notes() -> list[str]:
+    """Built-ins ride along with this reinstall. URL installs stay on the SHA in connectors.toml."""
+    data = cx.load_global()
+    known: dict[str, Any] = data["connectors"]
+    order = [name for name in data["order"] if name in known] + [name for name in known if name not in data["order"]]
+    builtin = [name for name in order if known[name].get("builtin")]
+    pinned = [name for name in order if known[name].get("source")]
+    notes: list[str] = []
+    if builtin:
+        notes.append(f"built-in updated with release-cli: {', '.join(builtin)}")
+    if pinned:
+        notes.append(f"left on their installed SHA: {', '.join(pinned)} (`release connector update <name>`)")
+    return notes

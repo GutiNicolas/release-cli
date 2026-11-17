@@ -6,7 +6,14 @@ from typing import Any
 import pytest
 
 from release_cli.config import load
-from release_cli.connectors import Connector, ConnectorError, MissingAnswer, ProtocolError, collect_answers, parse_questions
+from release_cli.connectors import (
+    Connector,
+    ConnectorError,
+    MissingAnswer,
+    ProtocolError,
+    collect_answers,
+    parse_questions,
+)
 from tests.conftest import write_config
 
 DEPLOY = Connector(name="platform-deploy", command=[])
