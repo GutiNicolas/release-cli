@@ -14,7 +14,7 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
-from release_cli import adapters, cursor_review, github_release, gitops, prompts, update
+from release_cli import adapters, cursor_review, doctor, github_release, gitops, prompts, update
 from release_cli import connectors as cx
 from release_cli.adapters.base import AdapterError
 from release_cli.config import (
@@ -30,7 +30,7 @@ from release_cli.config import (
 from release_cli.ui import alert, fail, info, warn
 from release_cli.versioning import PlanError, parse
 
-COMMANDS = ("connector", "connectors", "hook", "edit", "update", "status", "undo", "notes")
+COMMANDS = ("connector", "connectors", "hook", "edit", "update", "status", "undo", "notes", "doctor")
 GITHUB_URL = re.compile(r"^(https://[^/@\s]+/[^/@\s]+/[^/@\s]+?)(?:\.git)?/?(?:@(\S+))?$")
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 SLACK_WARNING = (
@@ -110,6 +110,9 @@ def build_parser() -> argparse.ArgumentParser:
     st.add_argument("--json", action="store_true", help="print one JSON object")
     st.add_argument("--no-fetch", action="store_true", help="compare with origin as last fetched")
 
+    dr = sub.add_parser("doctor", help="check why release would not work here (tools, install, connectors, project); changes nothing")
+    dr.add_argument("--json", action="store_true", help="print the checks as a JSON list")
+
     undo = sub.add_parser("undo", help="delete a pushed release candidate's tags (origin and local) after confirming")
     undo.add_argument("tag", help="X.Y.Z-rcN or <artifact>-X.Y.Z-rcN")
     undo.add_argument("--force", action="store_true", help="do not ask for confirmation")
@@ -137,6 +140,8 @@ def main(argv: list[str]) -> None:
             update_command(ns)
         elif ns.command == "status":
             status(Path.cwd(), as_json=ns.json, fetch=not ns.no_fetch)
+        elif ns.command == "doctor":
+            doctor.main_exit(Path.cwd(), as_json=ns.json)
         elif ns.command == "undo":
             undo(Path.cwd(), ns.tag, force=ns.force)
         elif ns.command == "notes":
