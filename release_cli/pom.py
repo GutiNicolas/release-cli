@@ -122,6 +122,8 @@ def _project_child_lines(xml: str) -> dict[str, int]:
         else:
             _record(stack, name, line, hits)
             stack.append(name)
+        # A tag can span lines (e.g. <project xmlns=... on several lines).
+        line += xml.count("\n", i, match.end())
         i = match.end()
     return hits
 
