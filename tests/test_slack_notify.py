@@ -190,3 +190,11 @@ def test_builtin_is_wired_and_speaks_protocol_1_over_stdin() -> None:
         check=True,
     )
     assert parse_questions(json.loads(proc.stdout)).applies
+
+
+def test_a_malformed_webhook_fails_without_showing_its_path(hook: Hook, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    # http.client rejects a space in the path with an error that quotes the path, which is the secret part.
+    monkeypatch.setenv(secrets.env_var(SECRET), hook.url + " SECRETPART2")
+    res = sn.run(_req())
+    assert res["ok"] is False
+    assert "SECRETPART" not in json.dumps(res) + capsys.readouterr().err

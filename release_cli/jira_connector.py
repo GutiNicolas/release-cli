@@ -11,6 +11,7 @@ On an RC it writes nothing and only warns about tickets that are not in a QA sta
 from __future__ import annotations
 
 import base64
+import http.client
 import json
 import re
 import subprocess
@@ -78,7 +79,7 @@ class Jira:
         except urlerror.HTTPError as exc:
             detail = self._clean(exc.read().decode("utf-8", "replace").strip())  # redact before cutting
             raise JiraError(f"{method} {path}: HTTP {exc.code} {detail[:300]}", exc.code) from None
-        except (urlerror.URLError, OSError, TimeoutError) as exc:
+        except (urlerror.URLError, OSError, TimeoutError, http.client.HTTPException) as exc:
             raise JiraError(self._clean(f"{method} {path}: {getattr(exc, 'reason', exc)}")) from None
         try:
             return json.loads(raw) if raw.strip() else None

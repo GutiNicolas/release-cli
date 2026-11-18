@@ -9,6 +9,7 @@ the run state or an error message.
 
 from __future__ import annotations
 
+import http.client
 import json
 import sys
 import urllib.error
@@ -138,9 +139,11 @@ def post(url: str, payload: dict[str, Any]) -> str | None:
     except urllib.error.HTTPError as exc:
         body = exc.read().decode("utf-8", "replace").strip()[:200]
         reason = f"Slack answered HTTP {exc.code}" + (f": {body}" if body else "")
-    except (urllib.error.URLError, OSError, ValueError) as exc:
+    except (urllib.error.URLError, OSError, ValueError, http.client.HTTPException) as exc:
         reason = f"could not reach Slack: {exc}"
-    return reason.replace(url, "<webhook>")
+    path = urlsplit(url).path
+    reason = reason.replace(url, "<webhook>")
+    return reason.replace(path, "<webhook path>") if len(path) > 1 else reason  # http.client quotes the path alone
 
 
 def run(req: dict[str, Any]) -> dict[str, Any]:
