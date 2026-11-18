@@ -12,8 +12,8 @@ gets a Slack message with what shipped. Both are built-in connectors of release-
   checklist with every ticket of the project's key ticked; the user unticks or adds keys before anything runs.
   This needs a new protocol question type `multi` (backward compatible addition to protocol 1).
 - The deploy platform refuses a prd deploy unless the Jira version named exactly `{artifact}-{X.Y.Z}` (e.g.
-  `fraud-atlas-1.0.0` in project `FRFLOW`) exists, is released, and its tickets are in the delivered status
-  ("Entregado"). Jira cannot release a version without tickets.
+  `example-app-1.0.0` in project `ABC`) exists, is released, and its tickets are in the delivered status
+  ("Delivered"). Jira cannot release a version without tickets.
 - RC = qa, final = prd (the deploy connector still asks its own environment). On an RC the `jira` connector writes
   nothing and never blocks: it only warns about tickets not in an allowed qa status (default `Code Review`,
   `Code Review Approved`, per project).
@@ -51,7 +51,7 @@ the delivered status), `qa_statuses` (list, default `["Code Review", "Code Revie
 (`[connectors.slack-notify]`): `webhook_secret` (secret name), `notify_on` = `final` | `every-deploy`.
 
 **Run results passed in `prior`:**
-- `jira`: `{"mode": "rc|fv", "jira_version": "fraud-atlas-1.0.0", "released": bool, "url",
+- `jira`: `{"mode": "rc|fv", "jira_version": "example-app-1.0.0", "released": bool, "url",
   "issues": [{"key", "summary", "from", "to", "status": "delivered|already|failed|warned|ok", "reason"}]}`
 - `slack-notify`: `{"sent": bool, "reason"?}`. It reads `prior` of the deploy connector (environment), `github-release`
   (url) and `jira` (moved issues) when present.
@@ -70,7 +70,7 @@ Required order: build, `jira`, deploy, `github-release`, `slack-notify`, `cursor
 
 ## Open questions
 - How the deploy platform reads the Jira version (exact name match, project from `jira_project_key`) is taken from the
-  user; T-03's manual check on a real FRFLOW release confirms it.
+  user; T-03's manual check on a real release confirms it.
 
 ## Log
 - 2026-11-17: T-04 (#13) and T-03 (#14) squash-merged into release/jira-slack-p1 (README and BUILTINS conflict resolved once); version 0.3.0.
@@ -78,5 +78,5 @@ Required order: build, `jira`, deploy, `github-release`, `slack-notify`, `cursor
 - 2026-11-18: T-03 and T-04 dispatched.
 - 2026-11-17: T-01 (#12) and T-02 (#11) squash-merged into release/jira-slack-p1; T-03 and T-04 are ready to dispatch.
 - 2026-11-17: requirement change: Jira delivery is a prd prerequisite (fixVersion `{artifact}-{X.Y.Z}` released,
-  tickets "Entregado"), `jira` runs before the deploy, RCs only warn. T-01 and T-02 dispatched.
+  tickets "Delivered"), `jira` runs before the deploy, RCs only warn. T-01 and T-02 dispatched.
 - 2026-11-17: user accepted the proposals: `notify_on` default `final`, Jira Cloud only, other projects' keys listed unticked.
