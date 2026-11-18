@@ -127,3 +127,35 @@ def delete_remote_tags(names: list[str]) -> None:
 
 def push_atomic(tags: list[str]) -> None:
     _out(["git", "push", "--atomic", "origin", "HEAD", *tags])
+
+
+def branch_exists_local(name: str) -> bool:
+    return run(["git", "rev-parse", "--verify", "--quiet", f"refs/heads/{name}"], check=False).returncode == 0
+
+
+def remote_branch_exists(name: str) -> bool:
+    result = run(["git", "ls-remote", "--heads", "origin", f"refs/heads/{name}"], check=False)
+    if result.returncode != 0:
+        raise GitError((result.stderr or "git ls-remote failed").strip())
+    return bool(result.stdout.strip())
+
+
+def remote_tags_of(version: str) -> list[str]:
+    """Tags on origin named <version> or <version>-rcN."""
+    result = run(["git", "ls-remote", "--tags", "origin", f"refs/tags/{version}", f"refs/tags/{version}-rc*"], check=False)
+    if result.returncode != 0:
+        raise GitError((result.stderr or "git ls-remote failed").strip())
+    return sorted({line.split("refs/tags/")[1] for line in result.stdout.splitlines() if not line.endswith("^{}")})
+
+
+def create_branch(name: str, start_tag: str) -> None:
+    """Create <name> at the commit of refs/tags/<start_tag> and switch to it (no upstream)."""
+    _out(["git", "switch", "--create", name, "--no-track", f"refs/tags/{start_tag}^{{commit}}"])
+
+
+def switch(branch: str) -> None:
+    _out(["git", "switch", branch])
+
+
+def delete_branch(name: str) -> None:
+    run(["git", "branch", "-D", name], check=False)

@@ -217,6 +217,24 @@ A connector is a `release.connectors` entry point pointing at a zero-arg callabl
 
 The built-in [`release_cli/cursor_review.py`](release_cli/cursor_review.py) is a small complete example; [`release_cli/connectors.py`](release_cli/connectors.py) has the exact validation.
 
+## Hotfix
+
+Patch a version that is already released:
+
+```sh
+release hotfix 2.74.0     # branch hotfix/2.74.1 from tag 2.74.0 (also accepts <artifact>-2.74.0)
+# fix, commit
+release -rc               # 2.74.1-rc0
+release -rc               # 2.74.1-rc1
+release -fv               # 2.74.1; then merge hotfix/2.74.1 back into your main branch
+```
+
+Without this, `release -rc` on the commit of a final tag starts the next **minor** (`2.75.0-rc0`). On a `hotfix/X.Y.Z` branch a new series is a **patch** instead; `--minor`, `--major` or an explicit version still win. The command makes no commit: the version file at the tag already reads `2.74.0`.
+
+`release hotfix` refuses when the tag is missing (it fetches it from `origin` if only the remote has it), is a release candidate, when the working tree is dirty, when `hotfix/X.Y.Z+1` already exists locally or on `origin`, when `X.Y.Z+1` (or one of its RCs) is already tagged, or when the version file at that tag does not read `X.Y.Z`. In every case nothing is created. It works for Maven (including multi-module), Gradle and sbt.
+
+The first release on the branch pushes it to `origin`. After `-fv`, `release` reminds you to merge the branch back and does not do it. Expect a conflict in the version file: keep the main branch's version.
+
 ## Status, undo, notes
 
 ```sh
