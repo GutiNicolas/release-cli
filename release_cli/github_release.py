@@ -71,11 +71,20 @@ def _git(root: Path, *args: str) -> str:
     return proc.stdout
 
 
+def commit_range(repo_root: Path, version: str, *, end: str | None = None) -> tuple[str | None, str]:
+    """(previous tag, git range) of the commits `version` ships: since the previous tag (a final: the previous final)."""
+    prev = previous_tag(version, _git(repo_root, "tag", "--list").split())
+    end = end or version
+    return prev, f"{prev}..{end}" if prev else end
+
+
+def git_log(repo_root: Path, rng: str, pretty: str, *, merges: bool = False) -> str:
+    return _git(repo_root, "log", *([] if merges else ["--no-merges"]), f"--pretty=format:{pretty}", rng, "--")
+
+
 def release_notes(repo_root: Path, version: str) -> str:
-    tags = _git(repo_root, "tag", "--list").split()
-    prev = previous_tag(version, tags)
-    rng = f"{prev}..{version}" if prev else version
-    log = _git(repo_root, "log", "--no-merges", "--pretty=format:%h%x09%s", rng, "--")
+    prev, rng = commit_range(repo_root, version)
+    log = git_log(repo_root, rng, "%h%x09%s")
     bullets = []
     for line in log.splitlines():
         sha, _, subject = line.partition("\t")

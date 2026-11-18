@@ -136,3 +136,73 @@ def test_invalid_question_schema_rejected(item: dict[str, Any], reason: str) -> 
 
 def test_missing_answer_is_a_connector_error() -> None:
     assert issubclass(MissingAnswer, ConnectorError)
+
+
+MULTI: dict[str, Any] = {
+    "id": "issues",
+    "type": "multi",
+    "prompt": "Issues",
+    "options": [{"value": "ABC-1", "label": "ABC-1 Fix login"}, "ABC-2", "ABC-3"],
+    "default": ["ABC-1", "ABC-2"],
+    "other": {"pattern": "[A-Z][A-Z0-9_]+-[0-9]+"},
+}
+
+
+@pytest.mark.parametrize(
+    ("change", "reason"),
+    [
+        ({"default": ["ABC-1", "ABC-9"]}, "subset"),
+        ({"default": ["ABC-1", "ABC-1"]}, "duplicate"),
+        ({"options": ["ABC-1", "ABC-1"]}, "duplicate options"),
+        ({"persist": "project"}, "persist must be none"),
+        ({"other": {"pattern": "("}}, "invalid other.pattern"),
+        ({"other": {}}, "other must be an object with a pattern"),
+        ({"options": [{"label": "no value"}]}, "each option"),
+        ({"options": [], "other": None}, "non-empty"),
+    ],
+)
+def test_invalid_multi_schema_rejected(change: dict[str, Any], reason: str) -> None:
+    with pytest.raises(ProtocolError, match=reason):
+        _qs([{**MULTI, **change}])
+
+
+def test_multi_parses_strings_and_objects_and_defaults_to_nothing() -> None:
+    q = _qs([{**MULTI, "default": None, "other": None}])[0]
+    assert q.options == ("ABC-1", "ABC-2", "ABC-3")
+    assert q.labels == ("ABC-1 Fix login", "ABC-2", "ABC-3")
+    assert q.default == [] and q.other is None
+
+
+def _multi(tmp_path: Path, replies: list[str], **kwargs: Any) -> list[str]:
+    answers, _ = _collect(tmp_path, replies, items=[MULTI], **kwargs)
+    return answers["issues"]
+
+
+def test_multi_enter_accepts_the_default(tmp_path: Path) -> None:
+    assert _multi(tmp_path, [""]) == ["ABC-1", "ABC-2"]
+
+
+def test_multi_toggle_add_and_remove_then_accept(tmp_path: Path) -> None:
+    # 2 unticks ABC-2, 3 ticks ABC-3, +XYZ-7 adds an extra, -ABC-1 unticks ABC-1; answer: option order, then extras.
+    assert _multi(tmp_path, ["2 3", "+XYZ-7 -ABC-1", ""]) == ["ABC-3", "XYZ-7"]
+
+
+def test_multi_rejects_bad_tokens_and_keeps_asking(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    # `+nope` fails other.pattern, `9` is out of range, `-XYZ-1` is not in the list; none of them change the selection.
+    assert _multi(tmp_path, ["+nope 9 -XYZ-1 junk", ""]) == ["ABC-1", "ABC-2"]
+    out = capsys.readouterr().out
+    assert "does not match" in out and "no item 9" in out and "not in the list" in out and "use a number" in out
+
+
+def test_multi_extra_can_be_toggled_off_by_its_number(tmp_path: Path) -> None:
+    assert _multi(tmp_path, ["+XYZ-7", "4", ""]) == ["ABC-1", "ABC-2"]
+
+
+def test_multi_without_other_refuses_unknown_keys(tmp_path: Path) -> None:
+    answers, _ = _collect(tmp_path, ["+XYZ-7", "+ABC-3", ""], items=[{**MULTI, "other": None}])
+    assert answers["issues"] == ["ABC-1", "ABC-2", "ABC-3"]
+
+
+def test_multi_defaults_takes_default_and_asks_nothing(tmp_path: Path) -> None:
+    answers, asked = _collect(tmp_path, [], defaults=True, items=[MULTI])
+    assert answers["issues"] == ["ABC-1", "ABC-2"] and asked == []
