@@ -146,6 +146,7 @@ release connector add https://github.com/example/release-connector          # la
 release connector add https://github.com/example/release-connector@v0.1.0   # pinned
 release connector add cursor-review                                                         # built in
 release connector add github-release                                                        # built in
+release connector add slack-notify                                                          # built in
 release connector ls        # order, enabled, break_on_error, installed commit SHA
 release connector update platform-build     # explicit; only a connector installed from a URL
 release connector remove platform-deploy
@@ -205,6 +206,17 @@ Settings: `release edit` then `global set cursor-review <key> <value>` for `dela
 ### github-release
 
 Optional, built in: `release connector add github-release`. After the push it creates the GitHub Release of the tag with the [GitHub CLI](https://cli.github.com/) (`gh`, installed and logged in with `gh auth login`). Release candidates are marked as pre-releases. The notes are the commits since the previous tag (for a final, since the previous final), without the CLI's own `[manual-release]` commits; `release notes <tag>` prints the same text. It asks once per release (default yes), skips repositories whose `origin` is not on github.com, and on a resume reuses a release that already exists instead of creating a second one.
+
+### slack-notify
+
+Optional, built in: `release connector add slack-notify`. After the deploy reaches `SUCCESS` (right after the push when the chain has no deploy connector) it posts one message to a Slack channel through an [incoming webhook](https://api.slack.com/messaging/webhooks): repo, version, environment, deploy type, a link to the GitHub Release, the released Jira version with its delivered tickets, and the release notes (trimmed to Slack's limits). Put it after the deploy and `github-release` in the order so it can read their results.
+
+The webhook URL is a secret: store it with `release secret set slack-webhook` (or the env var `RELEASE_SECRET_SLACK_WEBHOOK`). It is never written to `.release`, the run state, or the logs. The first time per project it asks:
+
+- `webhook_secret`: the secret's *name* (default `slack-webhook`).
+- `notify_on`: `final` (default; release candidates are not announced) or `every-deploy`.
+
+Then, once per release, "Send the Slack notice?" (default yes). A missing secret fails the connector with the `release secret set <name>` command to run; resume with `release connectors run <tag> --from slack-notify`. The webhook must be `https`. A deploy connector named something other than `platform-deploy` is set with `deploy_connector` under `[connectors.slack-notify]`.
 
 ### Writing a connector
 

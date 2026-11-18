@@ -33,7 +33,11 @@ QUESTIONS_TIMEOUT = 30.0
 DEFAULT_RUN_TIMEOUT = 3600.0
 STOP_GRACE = 10.0
 STDERR_TAIL = 20
-BUILTINS = {"cursor-review": "release_cli.cursor_review", "github-release": "release_cli.github_release"}
+BUILTINS = {
+    "cursor-review": "release_cli.cursor_review",
+    "github-release": "release_cli.github_release",
+    "slack-notify": "release_cli.slack_notify",
+}
 # connectors.toml [connectors.<name>.config] written when a built-in is first added.
 BUILTIN_CONFIG: dict[str, dict[str, Any]] = {"cursor-review": {"slack_cloud": False, "delay_minutes": 10}}
 NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]*$")
