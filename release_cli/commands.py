@@ -278,9 +278,9 @@ def install(url: str, sha: str) -> list[dict[str, str]]:
     return [ep for ep in found if _norm_url(ep["url"]) == _norm_url(url)]
 
 
-def _ask_position(name: str, size: int, *, defaults: bool, ask: prompts.Ask) -> int:
+def _ask_position(name: str, size: int, *, defaults: bool, ask: prompts.Ask, default: int | None = None) -> int:
     while True:
-        raw = prompts.ask_text(f"Position of {name} in the order (1-{size + 1})", str(size + 1), defaults=defaults, ask=ask)
+        raw = prompts.ask_text(f"Position of {name} in the order (1-{size + 1})", str(default or size + 1), defaults=defaults, ask=ask)
         if raw.isdigit() and 1 <= int(raw) <= size + 1:
             return int(raw) - 1
 
@@ -293,8 +293,12 @@ def register(
     break_default: bool,
     defaults: bool,
     ask: prompts.Ask = input,
+    position: int | None = None,
 ) -> list[str]:
-    """Add or refresh connectors in the global config. Existing ones keep their position and flags."""
+    """Add or refresh connectors in the global config. Existing ones keep their position and flags.
+
+    `position` (1-based) is the default offered for a new connector; the end of the order otherwise.
+    """
     added: list[str] = []
     for name in names:
         cx.check_name(name)
@@ -304,7 +308,7 @@ def register(
                 raise cx.ConnectorError(f"{name} is already installed from {entry.get('source') or 'built-in'}; remove it first")
             entry.update(base)
             continue
-        pos = _ask_position(name, len(g["order"]), defaults=defaults, ask=ask)
+        pos = _ask_position(name, len(g["order"]), defaults=defaults, ask=ask, default=position)
         boe = prompts.ask_bool(f"break_on_error for {name} (stop the chain when it fails)?", break_default, defaults=defaults, ask=ask)
         enabled = prompts.ask_bool(f"Enable {name}?", True, defaults=defaults, ask=ask)
         g["connectors"][name] = {**base, "enabled": enabled, "break_on_error": boe}
@@ -320,8 +324,10 @@ def connector_add(target: str, *, defaults: bool, ask: prompts.Ask = input) -> N
         base: dict[str, Any] = {"builtin": True}
         if target not in g["connectors"] and target in cx.BUILTIN_CONFIG:
             base["config"] = dict(cx.BUILTIN_CONFIG[target])
-        # jira gates the deploy: a failure must stop the chain
-        register(g, [target], base, break_default=target == "jira", defaults=defaults, ask=ask)
+        # jira gates the deploy: it goes before the first deploy connector, and a failure must stop the chain
+        deploy = next((i for i, n in enumerate(g["order"]) if "deploy" in n), None) if target == "jira" else None
+        position = None if deploy is None else deploy + 1
+        register(g, [target], base, break_default=target == "jira", defaults=defaults, ask=ask, position=position)
         cx.save_global(g)
         info(f"{target}: built in, order {g['order'].index(target) + 1}")
         return

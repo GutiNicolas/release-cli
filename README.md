@@ -210,9 +210,9 @@ Optional, built in: `release connector add github-release`. After the push it cr
 
 ### jira
 
-Optional, built in: `release connector add jira` (it stops the chain when it fails). The deploy platform refuses a prd deploy unless Jira already has the version `{artifact}-{X.Y.Z}` (for example `example-app-1.0.0`) released with its tickets delivered, so **`jira` must come before the deploy connector**: build, `jira`, deploy, `github-release`, `slack-notify`, `cursor-review`. Jira Cloud only (REST v3, email and API token).
+Optional, built in: `release connector add jira` (it stops the chain when it fails). The deploy platform refuses a prd deploy unless Jira already has the version `{artifact}-{X.Y.Z}` (for example `example-app-1.0.0`) released with its tickets delivered, so **`jira` must come before the deploy connector**: build, `jira`, deploy, `github-release`, `slack-notify`, `cursor-review`. `connector add jira` offers the position just before the first connector whose name contains `deploy`; check it with `release connector ls`. Jira Cloud only (REST v3, email and API token).
 
-Setup, once per machine: in `~/.config/release/release.toml` add `[jira]` with `base_url = "https://your-site.atlassian.net"` and `email = "you@example.com"`, then store the token with `release secret set jira-token`. Without them the connector is skipped and says so.
+Setup, once per machine: in `~/.config/release/release.toml` add `[jira]` with `base_url = "https://your-site.atlassian.net"` and `email = "you@example.com"`, then store the token with `release secret set jira-token`. Without them an RC skips the connector and says so; a final stops the chain before the deploy.
 
 The tickets are the keys (`ABC-123`) found in the commits since the previous tag (for a final, since the previous final), the same range as `release notes`. They are shown as a checklist with their summary and status: every key of the project is ticked, other projects' keys are listed unticked. Enter accepts, `2 5` toggles, `+ABC-9` adds, `-ABC-9` removes. The first time in a project it also asks `project_key` and `delivered_transition` (the workflow transition to the delivered status, offered from what Jira allows) and saves them under `[connectors.jira]`; `qa_statuses` there (default `Code Review`, `Code Review Approved`) lists the statuses an RC expects.
 

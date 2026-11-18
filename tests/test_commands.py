@@ -60,6 +60,15 @@ def test_add_builtin_cursor_review_defaults(capsys: pytest.CaptureFixture[str]) 
     assert "cursor-review  enabled=yes (global)  break_on_error=no" in capsys.readouterr().out
 
 
+def test_add_jira_defaults_to_just_before_the_deploy_connector() -> None:
+    # Enter on the position prompt must not put jira after the deploy: the platform refuses a prd deploy first.
+    connectors.save_global({"order": ["platform-build", "platform-deploy", "cursor-review"], "connectors": {}})
+    commands.connector_add("jira", defaults=True)
+    g = connectors.load_global()
+    assert g["order"] == ["platform-build", "jira", "platform-deploy", "cursor-review"]
+    assert g["connectors"]["jira"]["break_on_error"] is True
+
+
 def test_hook_add_and_edit_hooks(tmp_path: Path) -> None:
     write_config(tmp_path)
     commands.hook_add(tmp_path, when="before", cmd="mvn test", url=None, default=True, team=False)
