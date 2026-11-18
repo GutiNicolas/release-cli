@@ -76,8 +76,8 @@ class Jira:
             with _OPENER.open(req, timeout=HTTP_TIMEOUT) as resp:  # noqa: S310 (scheme checked in `client`)
                 raw = resp.read()
         except urlerror.HTTPError as exc:
-            detail = exc.read().decode("utf-8", "replace").strip()
-            raise JiraError(self._clean(f"{method} {path}: HTTP {exc.code} {detail[:300]}"), exc.code) from None
+            detail = self._clean(exc.read().decode("utf-8", "replace").strip())  # redact before cutting
+            raise JiraError(f"{method} {path}: HTTP {exc.code} {detail[:300]}", exc.code) from None
         except (urlerror.URLError, OSError, TimeoutError) as exc:
             raise JiraError(self._clean(f"{method} {path}: {getattr(exc, 'reason', exc)}")) from None
         try:
@@ -86,7 +86,7 @@ class Jira:
             raise JiraError(f"{method} {path}: the answer is not JSON (a proxy or login page in front of Jira?)") from None
 
     def _clean(self, text: str) -> str:
-        return text.replace(self._token, "***").replace(self._auth, "***")
+        return text.replace(self._token, "***").replace(self._auth.split()[1], "***")  # the header, or its value alone
 
     def issue(self, key: str) -> dict[str, Any]:
         return self.call("GET", f"/rest/api/3/issue/{quote(key)}?fields=summary,status,fixVersions")
@@ -302,6 +302,9 @@ def run_final(jira: Jira, req: dict[str, Any], keys: list[str], project: str, tr
     url = f"{jira.base_url}/projects/{project}/versions/{version['id']}"
     target: list[str] = []  # name of the delivered status, learned from the first ticket that offers the transition
     issues = [_deliver(jira, k, name, transition, target) for k in keys]
+    for i in issues:  # a ticket seen before any other ticket taught the delivered status: judge it again
+        if i["status"] == "failed" and i["reason"].startswith("no transition") and target and i["from"].lower() == target[0].lower():
+            i.update(status="already", reason="", to=i["from"])
     failed = [i for i in issues if i["status"] == "failed"]
     result: dict[str, Any] = {"mode": "fv", "jira_version": name, "released": bool(version.get("released")), "url": url, "issues": issues}
     if failed:

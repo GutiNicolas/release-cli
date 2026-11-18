@@ -21,6 +21,8 @@ WORKFLOW = {  # status -> transitions Jira offers from it
     "Code Review Approved": [{"id": "31", "name": "Entregado", "to": {"name": "Entregado"}}],
     "In Progress": [{"id": "21", "name": "Code Review", "to": {"name": "Code Review"}}],
     "Entregado": [],
+    "Ready": [{"id": "41", "name": "Deliver", "to": {"name": "Delivered"}}],  # transition named unlike its status
+    "Delivered": [],
 }
 
 
@@ -32,6 +34,7 @@ class FakeJira:
         self.reject_auth = False
         self.redirect: str | None = None
         self.html = False
+        self.pad = 0
 
     def add(self, key: str, status: str, summary: str = "does a thing") -> None:
         self.issues[key] = {"key": key, "fields": {"summary": summary, "status": {"name": status}, "fixVersions": []}}
@@ -42,7 +45,7 @@ class FakeJira:
     def handle(self, method: str, path: str, body: dict[str, Any]) -> tuple[int, Any]:
         self.log.append((method, path.split("?")[0]))
         if self.reject_auth:
-            return 401, {"errorMessages": ["unauthorized"]}
+            return 401, {"errorMessages": ["unauthorized" + "x" * self.pad]}
         if m := re.fullmatch(r"/rest/api/3/issue/([A-Z0-9-]+)", path.split("?")[0]):
             issue = self.issues.get(m[1])
             if issue is None:
@@ -287,3 +290,23 @@ def test_non_json_answer_skips_an_rc_instead_of_crashing(jira: FakeJira, repo: P
     jira.html = True
     resp = parse_questions(jc.questions(req(repo, mode="rc", version="1.1.0-rc1")))
     assert not resp.applies and not resp.blocked and "not JSON" in (resp.reason or "")
+
+
+def test_ticket_delivered_by_hand_counts_as_already_whatever_its_place_in_the_list(jira: FakeJira, tmp_path: Path) -> None:
+    jira.add("ABC-1", "Delivered")  # moved by hand; listed before the ticket that teaches the "Delivered" status
+    jira.add("ABC-2", "Ready")
+    request = req(tmp_path, answers={"issues": ["ABC-1", "ABC-2"]})
+    request["config"]["delivered_transition"] = "Deliver"
+    result = run_ok(jc.run(request))
+
+    assert result["ok"] and result["released"]
+    assert {i["key"]: i["status"] for i in result["issues"]} == {"ABC-1": "already", "ABC-2": "delivered"}
+
+
+def test_token_echo_cut_by_the_error_length_limit_is_still_redacted(jira: FakeJira, tmp_path: Path) -> None:
+    b64 = jc.Jira("http://x", "dev@example.com", TOKEN)._auth.split()[1]
+    jira.reject_auth = True
+    for pad in range(200, 290, 6):  # moves the echoed header across the 300-character cut
+        jira.pad = pad
+        text = json.dumps(jc.run(req(tmp_path, answers={"issues": ["ABC-1"]})))
+        assert b64[:16] not in text, pad
