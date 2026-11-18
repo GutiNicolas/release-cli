@@ -63,8 +63,8 @@ Required order: build, `jira`, deploy, `github-release`, `slack-notify`, `cursor
 ### Phase 1: Jira and Slack built-ins
 | Task | Repo | Depends on | Status | PR | Note |
 |---|---|---|---|---|---|
-| [T-01](tasks/T-01.md) `multi` question type | release-cli | — | in progress | | |
-| [T-02](tasks/T-02.md) secrets + `release secret` | release-cli | — | in progress | | |
+| [T-01](tasks/T-01.md) `multi` question type | release-cli | — | integrated | #12 | |
+| [T-02](tasks/T-02.md) secrets + `release secret` | release-cli | — | integrated | #11 | |
 | [T-03](tasks/T-03.md) `jira` connector | release-cli | T-01, T-02 | todo | | |
 | [T-04](tasks/T-04.md) `slack-notify` connector | release-cli | T-02 | todo | | reads T-03's result shape |
 
@@ -74,6 +74,7 @@ Required order: build, `jira`, deploy, `github-release`, `slack-notify`, `cursor
 
 ## Log
 - 2026-11-17: plan written (location, review checklist, per-project transition, Slack webhook decided by the user).
+- 2026-11-17: T-01 (#12) and T-02 (#11) squash-merged into release/jira-slack-p1; T-03 and T-04 are ready to dispatch.
 - 2026-11-17: requirement change: Jira delivery is a prd prerequisite (fixVersion `{artifact}-{X.Y.Z}` released,
   tickets "Entregado"), `jira` runs before the deploy, RCs only warn. T-01 and T-02 dispatched.
 - 2026-11-17: user accepted the proposals: `notify_on` default `final`, Jira Cloud only, other projects' keys listed unticked.
