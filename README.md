@@ -146,6 +146,7 @@ release connector add https://github.com/example/release-connector          # la
 release connector add https://github.com/example/release-connector@v0.1.0   # pinned
 release connector add cursor-review                                                         # built in
 release connector add github-release                                                        # built in
+release connector add jira                                                                  # built in
 release connector ls        # order, enabled, break_on_error, installed commit SHA
 release connector update platform-build     # explicit; only a connector installed from a URL
 release connector remove platform-deploy
@@ -205,6 +206,19 @@ Settings: `release edit` then `global set cursor-review <key> <value>` for `dela
 ### github-release
 
 Optional, built in: `release connector add github-release`. After the push it creates the GitHub Release of the tag with the [GitHub CLI](https://cli.github.com/) (`gh`, installed and logged in with `gh auth login`). Release candidates are marked as pre-releases. The notes are the commits since the previous tag (for a final, since the previous final), without the CLI's own `[manual-release]` commits; `release notes <tag>` prints the same text. It asks once per release (default yes), skips repositories whose `origin` is not on github.com, and on a resume reuses a release that already exists instead of creating a second one.
+
+### jira
+
+Optional, built in: `release connector add jira` (it stops the chain when it fails). The deploy platform refuses a prd deploy unless Jira already has the version `{artifact}-{X.Y.Z}` (for example `example-app-1.0.0`) released with its tickets delivered, so **`jira` must come before the deploy connector**: build, `jira`, deploy, `github-release`, `cursor-review`. Jira Cloud only (REST v3, email and API token).
+
+Setup, once per machine: in `~/.config/release/release.toml` add `[jira]` with `base_url = "https://your-site.atlassian.net"` and `email = "you@example.com"`, then store the token with `release secret set jira-token`. Without them the connector is skipped and says so.
+
+The tickets are the keys (`ABC-123`) found in the commits since the previous tag (for a final, since the previous final), the same range as `release notes`. They are shown as a checklist with their summary and status: every key of the project is ticked, other projects' keys are listed unticked. Enter accepts, `2 5` toggles, `+ABC-9` adds, `-ABC-9` removes. The first time in a project it also asks `project_key` and `delivered_transition` (the workflow transition to the delivered status, offered from what Jira allows) and saves them under `[connectors.jira]`; `qa_statuses` there (default `Code Review`, `Code Review Approved`) lists the statuses an RC expects.
+
+- **RC:** writes nothing and never blocks. Tickets whose status is not in `qa_statuses` are warned about.
+- **Final:** creates the Jira version if it is missing (an existing one is never renamed), sets it as fixVersion of every ticket, moves each ticket that is not yet delivered, then releases the version. No tickets, or a ticket that cannot be delivered, fails the connector: the version stays unreleased and the deploy does not run. Fix the ticket in Jira (or untick it) and run `release connectors run <tag> --from jira`; tickets already delivered are left alone.
+
+The result passed on as `prior["jira"]` is `{"mode", "jira_version", "released", "url", "issues": [{"key", "summary", "from", "to", "status", "reason"}]}`, with `status` one of `delivered`, `already`, `failed`, `warned`, `ok`.
 
 ### Writing a connector
 

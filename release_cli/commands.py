@@ -65,8 +65,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     connector = sub.add_parser("connector", help="install and manage connectors (global, ~/.config/release/connectors.toml)")
     csub = connector.add_subparsers(dest="action", required=True)
-    add = csub.add_parser("add", help="install from a GitHub URL (pin with @ref) or add a built-in (cursor-review, github-release)")
-    add.add_argument("target", help="https://github.com/org/repo[@ref], cursor-review, or github-release")
+    add = csub.add_parser("add", help="install from a GitHub URL (pin with @ref) or add a built-in (cursor-review, github-release, jira)")
+    add.add_argument("target", help="https://github.com/org/repo[@ref], cursor-review, github-release, or jira")
     _defaults_flag(add)
     csub.add_parser("ls", help="list installed connectors, order, and installed SHA")
     update = csub.add_parser("update", help="reinstall a connector from its source (explicit; never during a release)")
@@ -320,7 +320,8 @@ def connector_add(target: str, *, defaults: bool, ask: prompts.Ask = input) -> N
         base: dict[str, Any] = {"builtin": True}
         if target not in g["connectors"] and target in cx.BUILTIN_CONFIG:
             base["config"] = dict(cx.BUILTIN_CONFIG[target])
-        register(g, [target], base, break_default=False, defaults=defaults, ask=ask)
+        # jira gates the deploy: a failure must stop the chain
+        register(g, [target], base, break_default=target == "jira", defaults=defaults, ask=ask)
         cx.save_global(g)
         info(f"{target}: built in, order {g['order'].index(target) + 1}")
         return
