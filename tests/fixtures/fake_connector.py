@@ -56,6 +56,16 @@ if action == "questions":
         )
     if behavior == "int":
         reply({"protocol": 1, "questions": [{"id": "retries", "type": "int", "prompt": "Retries", "persist": "project"}]})
+    if behavior == "multi":
+        multi = {
+            "id": "issues",
+            "type": "multi",
+            "prompt": "Issues",
+            "options": [{"value": "ABC-1", "label": "ABC-1 Fix login"}, "ABC-2", "ABC-3"],
+            "default": ["ABC-1", "ABC-2"],
+            "other": {"pattern": "[A-Z][A-Z0-9_]+-[0-9]+"},
+        }
+        reply({"protocol": 1, "questions": [multi]})
     if behavior == "ok":
         reply({"protocol": 1, "questions": [{"id": "go", "type": "bool", "prompt": "Go?", "default": True}]})
     reply({"protocol": 1, "questions": [], "timeout_seconds": 1 if behavior == "slow-run" else 60})

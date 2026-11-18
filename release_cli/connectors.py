@@ -196,6 +196,8 @@ class Question:
     pattern: str | None = None
     lo: int | None = None
     hi: int | None = None
+    labels: tuple[str, ...] = ()  # multi: display text per option, same order as `options`
+    other: str | None = None  # multi: pattern extra values must match; None = no extras
 
     def value_error(self, value: Any) -> str | None:
         """Why `value` is not a valid answer to this question, or None."""
@@ -207,6 +209,15 @@ class Question:
             if type(value) is not int:
                 return "expected a whole number"
             return prompts.int_error(str(value), self.lo, self.hi)
+        if self.type == "multi":
+            if not isinstance(value, list) or not all(isinstance(v, str) for v in value):
+                return "expected a list of strings"
+            if len(set(value)) != len(value):
+                return "duplicate values"
+            for v in value:
+                if v not in self.options and not (self.other is not None and re.fullmatch(self.other, v)):
+                    return f"{v!r} is not an option" + ("" if self.other is None else f" and does not match {self.other}")
+            return None
         if not isinstance(value, str):
             return "expected text"
         if self.pattern is not None and value and not re.fullmatch(self.pattern, value):
@@ -302,13 +313,15 @@ def _parse_question(item: Any, idx: int, seen: set[str]) -> Question:
     if qid in seen:
         raise ProtocolError(f"duplicate question id {qid!r}")
     seen.add(qid)
-    if qtype not in ("bool", "choice", "text", "int"):
-        raise ProtocolError(f"{qid}: type must be bool, choice, text, or int")
+    if qtype not in ("bool", "choice", "text", "int", "multi"):
+        raise ProtocolError(f"{qid}: type must be bool, choice, text, int, or multi")
     if not isinstance(prompt, str) or not prompt.strip():
         raise ProtocolError(f"{qid}: missing prompt")
     persist = item.get("persist", "project" if qtype == "text" else "none")
     if persist not in ("project", "none"):
         raise ProtocolError(f"{qid}: persist must be project or none")
+    if qtype == "multi" and persist != "none":
+        raise ProtocolError(f"{qid}: persist must be none for a multi question")
     earlier = seen - {qid}
     when = _parse_condition(item.get("when", {}), earlier, f"{qid}: when")
     options: tuple[str, ...] = ()
@@ -320,6 +333,10 @@ def _parse_question(item: Any, idx: int, seen: set[str]) -> Question:
         if len(set(raw_opts)) != len(raw_opts):
             raise ProtocolError(f"{qid}: duplicate options")
         options = tuple(raw_opts)
+    labels: tuple[str, ...] = ()
+    other: str | None = None
+    if qtype == "multi":
+        options, labels, other = _parse_multi(item, qid)
     if qtype in ("text", "int"):
         required = item.get("required", True)
         if not isinstance(required, bool):
@@ -338,10 +355,15 @@ def _parse_question(item: Any, idx: int, seen: set[str]) -> Question:
             raise ProtocolError(f"{qid}: min and max must be whole numbers")
         if lo is not None and hi is not None and lo > hi:
             raise ProtocolError(f"{qid}: min is greater than max")
-    q = Question(qid, qtype, prompt.strip(), item.get("default"), options, required, persist, when, (), pattern, lo, hi)
+    default = item.get("default")
+    if qtype == "multi" and default is None:
+        default = []
+    q = Question(qid, qtype, prompt.strip(), default, options, required, persist, when, (), pattern, lo, hi, labels, other)
     if q.default is not None or qtype in ("bool", "choice"):
         if (err := q.value_error(q.default)) is not None:
             raise ProtocolError(f"{qid}: default: {err}")
+        if qtype == "multi" and not set(q.default) <= set(options):
+            raise ProtocolError(f"{qid}: default must be a subset of the option values")
     raw_dw = item.get("default_when", [])
     if not isinstance(raw_dw, list):
         raise ProtocolError(f"{qid}: default_when must be a list")
@@ -355,6 +377,39 @@ def _parse_question(item: Any, idx: int, seen: set[str]) -> Question:
             raise ProtocolError(f"{where_rule}.default: {err}")
         rules.append((cond, rule["default"]))
     return replace(q, default_when=tuple(rules))
+
+
+def _parse_multi(item: dict[str, Any], qid: str) -> tuple[tuple[str, ...], tuple[str, ...], str | None]:
+    raw_other = item.get("other")
+    other: str | None = None
+    if raw_other is not None:
+        pat = raw_other.get("pattern") if isinstance(raw_other, dict) else None
+        if not isinstance(pat, str) or not pat:
+            raise ProtocolError(f"{qid}: other must be an object with a pattern")
+        try:
+            re.compile(pat)
+        except re.error as exc:
+            raise ProtocolError(f"{qid}: invalid other.pattern: {exc}") from exc
+        other = pat
+    raw_opts = item.get("options")
+    if not isinstance(raw_opts, list) or (not raw_opts and other is None):
+        raise ProtocolError(f"{qid}: options must be a non-empty list")
+    values: list[str] = []
+    labels: list[str] = []
+    for opt in raw_opts:
+        if isinstance(opt, str):
+            value, label = opt, opt
+        elif isinstance(opt, dict) and isinstance(opt.get("value"), str):
+            value, label = opt["value"], opt.get("label", opt["value"])
+        else:
+            value, label = "", ""
+        if not value or not isinstance(label, str) or not label.strip():
+            raise ProtocolError(f"{qid}: each option must be a non-empty string or {{\"value\", \"label\"}}")
+        values.append(value)
+        labels.append(label.strip())
+    if len(set(values)) != len(values):
+        raise ProtocolError(f"{qid}: duplicate options")
+    return tuple(values), tuple(labels), other
 
 
 def _parse_condition(raw: Any, earlier: set[str], where: str) -> dict[str, Any]:
@@ -539,6 +594,10 @@ def describe(q: Question) -> str:
         return f"{q.prompt} (y/n) [{'y' if q.default else 'n'}]{extra}"
     if q.type == "choice":
         return f"{q.prompt} ({'/'.join(q.options)}) [{q.default}]{extra}"
+    if q.type == "multi":
+        listed = ", ".join(v if label == v else f"{v} ({label})" for v, label in zip(q.options, q.labels, strict=True))
+        more = f"; extras matching {q.other}" if q.other else ""
+        return f"{q.prompt} (pick any of: {listed}{more}) [default: {', '.join(q.default_for({}) or []) or 'none'}]{extra}"
     kind = q.type if q.type == "text" else f"int {q.lo if q.lo is not None else ''}..{q.hi if q.hi is not None else ''}"
     if q.pattern:
         kind += f" matching {q.pattern}"
@@ -569,6 +628,10 @@ def _ask_one_raw(conn: Connector, q: Question, default: Any, *, defaults: bool, 
         return prompts.ask_bool(label, default, defaults=defaults, ask=ask)
     if q.type == "choice":
         return prompts.ask_choice(label, list(q.options), default, defaults=defaults, ask=ask)
+    if q.type == "multi":
+        return prompts.ask_multi(
+            label, list(q.options), list(q.labels), default or [], other=q.other, defaults=defaults, ask=ask
+        )
     if q.type == "int":
         check = lambda raw: prompts.int_error(raw, q.lo, q.hi)  # noqa: E731
     else:
