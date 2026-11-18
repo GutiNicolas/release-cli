@@ -7,7 +7,7 @@ import sys
 from importlib import metadata
 from pathlib import Path
 
-from release_cli import adapters, commands, gitops, prompts
+from release_cli import adapters, commands, gitops, hotfix, prompts
 from release_cli import connectors as cx
 from release_cli.adapters.base import AdapterError
 from release_cli.config import Config, ConfigError, load
@@ -30,6 +30,7 @@ from release_cli.versioning import (
     PlanError,
     ProjectVersion,
     ReleasePlan,
+    is_hotfix_branch,
     parse,
     plan,
 )
@@ -55,6 +56,7 @@ commands:
   release hook add --when before|after --cmd "..."   release edit
   release status [--json]   release history [--limit N] [--finals] [--json]
   release notes [tag]   release undo <rc-tag>
+  release hotfix <X.Y.Z>   (branch hotfix/X.Y.Z+1 from a released tag; `release -rc` there ships the patch)
   release update   (pull the release-cli clone and reinstall, from any directory)
   release doctor [--json]   (why release would not work here; changes nothing)
 
@@ -116,18 +118,30 @@ def _bump_from(ns: argparse.Namespace) -> Bump | None:
     return None
 
 
+def _hotfix_branch() -> str | None:
+    """The current branch when it is a `release hotfix` branch, else None (also outside git or detached)."""
+    try:
+        branch = gitops.current_repo().branch
+    except gitops.GitError:
+        return None
+    return branch if is_hotfix_branch(branch) else None
+
+
 def _plan_release(current: ProjectVersion, ns: argparse.Namespace, bump: Bump | None) -> ReleasePlan:
     """Plan the release. A new series while an RC is open asks before replacing it."""
+    default: Bump = "minor"
+    if not bump and not ns.version and _hotfix_branch():
+        default = "patch"  # on hotfix/X.Y.Z a new series is a patch, not the next minor
     override = False
     if not ns.fv and current.rc is not None and (bump or ns.version):
-        preview = plan(current, final=False, bump=bump, explicit=ns.version, override=True)
+        preview = plan(current, final=False, bump=bump, explicit=ns.version, override=True, default_bump=default)
         override = prompts.ask_bool(
             f"a release candidate is already in progress ({current.format()}). "
             f"overwrite it with {preview.release.format()}?",
             False,
             defaults=ns.defaults,
         )
-    return plan(current, final=ns.fv, bump=bump, explicit=ns.version, override=override)
+    return plan(current, final=ns.fv, bump=bump, explicit=ns.version, override=override, default_bump=default)
 
 
 def _preflight(planned_tags: list[str]) -> list[str]:
@@ -255,12 +269,15 @@ def _release(ns: argparse.Namespace) -> None:
     original = version_path.read_text(encoding="utf-8") if version_path.is_file() else ""
 
     info(_paint(GREEN, "DRY-RUN STARTING RELEASE" if ns.dry_run else "STARTING RELEASE"))
+    on_hotfix = _hotfix_branch()
     info(f"TOOL: {cfg.tool}")
     info(f"CURRENT VERSION: {current.format()}")
     info(f"PROJECT ARTIFACT: {artifact}")
     info(f"RELEASE VERSION: {release_ver}")
     info(f"NEXT SNAPSHOT: {snapshot_ver}")
     info(f"TAGS: {', '.join(tags)}")
+    if on_hotfix and not ns.fv and current.rc is None and not bump and not ns.version:
+        info(f"HOTFIX BRANCH {on_hotfix}: a new series is a patch bump (use --minor or --major to override)")
     if cfg.hooks:
         for hook in cfg.hooks:
             info(f"HOOK {hook.when}: {hook.cmd}")
@@ -365,10 +382,10 @@ def _release(ns: argparse.Namespace) -> None:
     summary["sha"] = gitops.tag_commit(release_ver)
     if planned.release.rc is None:
         nxt = planned.next_snapshot
-        info(
-            f"left project at {snapshot_ver} (already released). "
-            f"next `release -rc` starts {nxt.major}.{nxt.minor + 1}.0-rc0"
-        )
+        nxt_start = f"{nxt.major}.{nxt.minor}.{nxt.patch + 1}" if on_hotfix else f"{nxt.major}.{nxt.minor + 1}.0"
+        info(f"left project at {snapshot_ver} (already released). next `release -rc` starts {nxt_start}-rc0")
+        if on_hotfix:
+            info("REMINDER: " + hotfix.merge_back_reminder(on_hotfix))
 
     # Past the atomic push: nothing below may reset, delete, or move a tag.
     if ns.skip_connectors:
