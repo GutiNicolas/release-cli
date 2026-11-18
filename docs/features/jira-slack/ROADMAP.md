@@ -73,6 +73,7 @@ Required order: build, `jira`, deploy, `github-release`, `slack-notify`, `cursor
   user; T-03's manual check on a real release confirms it.
 
 ## Log
+- 2026-11-17: release review of #15: unconfigured Jira now blocks a final (was skipped); a final's chain refuses to start when `jira` runs after the deploy connector; token redaction, redirect and non-JSON hardening; slack webhook path kept out of errors; example names made generic. Real-Jira manual check from #14 still open.
 - 2026-11-17: T-04 (#13) and T-03 (#14) squash-merged into release/jira-slack-p1 (README and BUILTINS conflict resolved once); version 0.3.0.
 - 2026-11-17: plan written (location, review checklist, per-project transition, Slack webhook decided by the user).
 - 2026-11-18: T-03 and T-04 dispatched.
