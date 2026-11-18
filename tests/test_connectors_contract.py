@@ -314,3 +314,14 @@ def test_multi_defaults_and_closed_stdin(project: Path) -> None:
     assert not commands.post_push(project, cfg, "1.5.0-rc0", "abc123", defaults=False, dry_run=False, ask=closed)
     state = connectors.load_state(project.name, "1.5.0-rc0")["connectors"]
     assert state["a"]["status"] == "failed" and "stdin closed" in state["a"]["error"]
+
+
+def test_final_refuses_a_chain_where_jira_comes_after_the_deploy(project: Path) -> None:
+    # A project `order` that leaves jira out puts it after the deploy; the platform would get a prd deploy first.
+    install_fakes(("platform-deploy", "echo"), ("jira", "echo"))
+    cfg = load(project)
+    assert cfg is not None
+    ok = commands.post_push(project, cfg, "1.5.0", "abc123", defaults=True, dry_run=False, ask=lambda _p: "")
+    assert not ok and calls(project) == []
+    rc = commands.post_push(project, cfg, "1.5.0-rc0", "abc123", defaults=True, dry_run=False, ask=lambda _p: "")
+    assert rc and [c["request"]["connector"] for c in calls(project) if c["action"] == "run"] == ["platform-deploy", "jira"]

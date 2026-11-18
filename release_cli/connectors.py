@@ -750,6 +750,18 @@ def resume_hint(tag: str, name: str) -> str:
 # ---------- chain ----------
 
 
+def jira_after_deploy(conns: list[Connector]) -> str | None:
+    """Why the chain must not run a final: `jira` gates the prd deploy, so it must run before the deploy connector."""
+    names = [c.name for c in conns if c.enabled]
+    jira = next((c for c in conns if c.name == "jira" and c.enabled), None)
+    if jira is None:
+        return None
+    deploy = str(jira.config.get("deploy_connector") or "platform-deploy")
+    if deploy in names and names.index(deploy) < names.index("jira"):
+        return f"jira runs after {deploy}, so the deploy would reach prd before Jira has the version released"
+    return None
+
+
 def run_chain(
     context: dict[str, Any],
     conns: list[Connector],
@@ -771,6 +783,10 @@ def run_chain(
     """
     tag = context["release_version"]
     alert = alert or log  # failures and resume hints; the CLI keeps them visible under --quiet
+    misordered = jira_after_deploy(conns) if context.get("mode") == "fv" else None
+    if misordered:
+        alert(f"{misordered}; nothing ran. Put jira first in `order` (`release edit`), then: release connectors run {tag}")
+        return False
     saved: dict[str, Any] = state.setdefault("connectors", {})
     # name -> (request, answers, timeout, resume_job)
     ready: dict[str, tuple[dict[str, Any], dict[str, Any], float, str | None]] = {}
