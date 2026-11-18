@@ -56,6 +56,7 @@ commands:
   release status [--json]   release history [--limit N] [--finals] [--json]
   release notes [tag]   release undo <rc-tag>
   release update   (pull the release-cli clone and reinstall, from any directory)
+  release doctor [--json]   (why release would not work here; changes nothing)
 
 CI: --defaults with --json (one JSON object on stdout) or --quiet (result line only).
 """
