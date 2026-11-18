@@ -265,6 +265,18 @@ Each line is `ok`, `warn` or `FAIL`, with what to do next. It checks:
 
 The exit code is 1 if any line fails. Warnings do not change it.
 
+## Secrets
+
+Tokens and webhook URLs (for example a Jira API token or a Slack webhook) never go in `.release`, `release.toml`, `connectors.toml`, run state or a log line. Config files hold a secret's *name*; the connector looks the value up when it runs.
+
+```sh
+release secret set jira-token   # asks for the value, hidden; it is never a command-line argument
+release secret ls               # names only
+release secret rm jira-token
+```
+
+A secret is found in this order: the environment variable `RELEASE_SECRET_<NAME>` (upper case, `-` becomes `_`, so `RELEASE_SECRET_JIRA_TOKEN`; use it in CI), then the macOS Keychain, then `secret-tool` (Linux keyring). `release secret set` stores in the Keychain on macOS and in the keyring on Linux. Without either, set the environment variable instead.
+
 ## CI and scripts
 
 - `--json`: stdout carries exactly one JSON object, also on errors (`{"ok": false, "error": ..., "exit_code": ...}`). Progress, prompts, and hook output go to stderr. On success: `tool`, `artifact`, `version`, `next_snapshot`, `tags`, `sha`, `connectors` (name → status); with `--dry-run`, `files` instead of `sha`.

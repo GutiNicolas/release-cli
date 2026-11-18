@@ -59,6 +59,7 @@ commands:
   release hotfix <X.Y.Z>   (branch hotfix/X.Y.Z+1 from a released tag; `release -rc` there ships the patch)
   release update   (pull the release-cli clone and reinstall, from any directory)
   release doctor [--json]   (why release would not work here; changes nothing)
+  release secret set|rm <name>   release secret ls   (tokens and webhook URLs: OS keychain, never a config file)
 
 CI: --defaults with --json (one JSON object on stdout) or --quiet (result line only).
 """
