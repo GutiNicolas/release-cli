@@ -63,16 +63,17 @@ Required order: build, `jira`, deploy, `github-release`, `slack-notify`, `cursor
 ### Phase 1: Jira and Slack built-ins
 | Task | Repo | Depends on | Status | PR | Note |
 |---|---|---|---|---|---|
-| [T-01](tasks/T-01.md) `multi` question type | release-cli | — | integrated | #12 | |
-| [T-02](tasks/T-02.md) secrets + `release secret` | release-cli | — | integrated | #11 | |
-| [T-03](tasks/T-03.md) `jira` connector | release-cli | T-01, T-02 | integrated | #14 | real-Jira manual check not run |
-| [T-04](tasks/T-04.md) `slack-notify` connector | release-cli | T-02 | integrated | #13 | reads T-03's result shape |
+| [T-01](tasks/T-01.md) `multi` question type | release-cli | — | merged | #12 | |
+| [T-02](tasks/T-02.md) secrets + `release secret` | release-cli | — | merged | #11 | |
+| [T-03](tasks/T-03.md) `jira` connector | release-cli | T-01, T-02 | merged | #14 | real-Jira manual check not run |
+| [T-04](tasks/T-04.md) `slack-notify` connector | release-cli | T-02 | merged | #13 | reads T-03's result shape |
 
 ## Open questions
 - How the deploy platform reads the Jira version (exact name match, project from `jira_project_key`) is taken from the
   user; T-03's manual check on a real release confirms it.
 
 ## Log
+- 2026-11-17: phase 1 released as 0.3.0: release PR #15 squash-merged into main (squash keeps old example names out of main's history); T-01..T-04 merged.
 - 2026-11-17: release review of #15: unconfigured Jira now blocks a final (was skipped); a final's chain refuses to start when `jira` runs after the deploy connector; token redaction, redirect and non-JSON hardening; slack webhook path kept out of errors; example names made generic. Real-Jira manual check from #14 still open.
 - 2026-11-17: T-04 (#13) and T-03 (#14) squash-merged into release/jira-slack-p1 (README and BUILTINS conflict resolved once); version 0.3.0.
 - 2026-11-17: plan written (location, review checklist, per-project transition, Slack webhook decided by the user).
