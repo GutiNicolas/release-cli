@@ -147,6 +147,7 @@ release connector add https://github.com/example/release-connector@v0.1.0   # pi
 release connector add cursor-review                                                         # built in
 release connector add github-release                                                        # built in
 release connector add jira                                                                  # built in
+release connector add slack-notify                                                          # built in
 release connector ls        # order, enabled, break_on_error, installed commit SHA
 release connector update platform-build     # explicit; only a connector installed from a URL
 release connector remove platform-deploy
@@ -209,7 +210,7 @@ Optional, built in: `release connector add github-release`. After the push it cr
 
 ### jira
 
-Optional, built in: `release connector add jira` (it stops the chain when it fails). The deploy platform refuses a prd deploy unless Jira already has the version `{artifact}-{X.Y.Z}` (for example `example-app-1.0.0`) released with its tickets delivered, so **`jira` must come before the deploy connector**: build, `jira`, deploy, `github-release`, `cursor-review`. Jira Cloud only (REST v3, email and API token).
+Optional, built in: `release connector add jira` (it stops the chain when it fails). The deploy platform refuses a prd deploy unless Jira already has the version `{artifact}-{X.Y.Z}` (for example `example-app-1.0.0`) released with its tickets delivered, so **`jira` must come before the deploy connector**: build, `jira`, deploy, `github-release`, `slack-notify`, `cursor-review`. Jira Cloud only (REST v3, email and API token).
 
 Setup, once per machine: in `~/.config/release/release.toml` add `[jira]` with `base_url = "https://your-site.atlassian.net"` and `email = "you@example.com"`, then store the token with `release secret set jira-token`. Without them the connector is skipped and says so.
 
@@ -219,6 +220,17 @@ The tickets are the keys (`ABC-123`) found in the commits since the previous tag
 - **Final:** creates the Jira version if it is missing (an existing one is never renamed), sets it as fixVersion of every ticket, moves each ticket that is not yet delivered, then releases the version. No tickets, or a ticket that cannot be delivered, fails the connector: the version stays unreleased and the deploy does not run. Fix the ticket in Jira (or untick it) and run `release connectors run <tag> --from jira`; tickets already delivered are left alone.
 
 The result passed on as `prior["jira"]` is `{"mode", "jira_version", "released", "url", "issues": [{"key", "summary", "from", "to", "status", "reason"}]}`, with `status` one of `delivered`, `already`, `failed`, `warned`, `ok`.
+
+### slack-notify
+
+Optional, built in: `release connector add slack-notify`. After the deploy reaches `SUCCESS` (right after the push when the chain has no deploy connector) it posts one message to a Slack channel through an [incoming webhook](https://api.slack.com/messaging/webhooks): repo, version, environment, deploy type, a link to the GitHub Release, the released Jira version with its delivered tickets, and the release notes (trimmed to Slack's limits). Put it after the deploy and `github-release` in the order so it can read their results.
+
+The webhook URL is a secret: store it with `release secret set slack-webhook` (or the env var `RELEASE_SECRET_SLACK_WEBHOOK`). It is never written to `.release`, the run state, or the logs. The first time per project it asks:
+
+- `webhook_secret`: the secret's *name* (default `slack-webhook`).
+- `notify_on`: `final` (default; release candidates are not announced) or `every-deploy`.
+
+Then, once per release, "Send the Slack notice?" (default yes). A missing secret fails the connector with the `release secret set <name>` command to run; resume with `release connectors run <tag> --from slack-notify`. The webhook must be `https`. A deploy connector named something other than `platform-deploy` is set with `deploy_connector` under `[connectors.slack-notify]`.
 
 ### Writing a connector
 

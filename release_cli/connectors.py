@@ -37,6 +37,7 @@ BUILTINS = {
     "cursor-review": "release_cli.cursor_review",
     "github-release": "release_cli.github_release",
     "jira": "release_cli.jira_connector",
+    "slack-notify": "release_cli.slack_notify",
 }
 # connectors.toml [connectors.<name>.config] written when a built-in is first added.
 BUILTIN_CONFIG: dict[str, dict[str, Any]] = {"cursor-review": {"slack_cloud": False, "delay_minutes": 10}}
