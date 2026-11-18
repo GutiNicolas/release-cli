@@ -54,9 +54,11 @@ resume (state in ~/.local/share/release/runs/{repo}/{tag}.json):
 commands:
   release connector add|ls|update|remove   release connectors run|status <tag>
   release hook add --when before|after --cmd "..."   release edit
-  release status [--json]   release notes [tag]   release undo <rc-tag>
+  release status [--json]   release history [--limit N] [--finals] [--json]
+  release notes [tag]   release undo <rc-tag>
   release hotfix <X.Y.Z>   (branch hotfix/X.Y.Z+1 from a released tag; `release -rc` there ships the patch)
   release update   (pull the release-cli clone and reinstall, from any directory)
+  release doctor [--json]   (why release would not work here; changes nothing)
 
 CI: --defaults with --json (one JSON object on stdout) or --quiet (result line only).
 """

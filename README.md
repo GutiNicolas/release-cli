@@ -240,11 +240,30 @@ The first release on the branch pushes it to `origin`. After `-fv`, `release` re
 ```sh
 release status              # version, open RC, last tag, branch vs origin, the last tag's connectors
 release status --json       # the same as one JSON object (--no-fetch skips the fetch)
+release history             # releases of this repo, newest first, with what each connector did
 release notes [tag]         # markdown notes since the previous tag (default: the latest tag)
 release undo 2.75.0-rc1     # deletes that RC's two tags on origin and locally, after asking (--force skips)
 ```
 
+`release history` lists the version tags of the repo (newest first, `--limit N`, default 10; `--finals` hides release candidates; `--json` prints one object) with the tag date and commit. Under each release it shows the saved connector runs of this machine: status, `updated_at`, the error, and for a connector that is not `ok` the command that resumes it. A tag with no saved runs shows `no connector runs on this machine`. It only reads.
+
 `release undo` only takes release candidates: a final may already be used by someone. It does not rewrite history. The version commits stay, so the next `release -rc` creates the next number (`rc2`). It cancels a pending cursor-review of that tag and forgets its saved connector runs. A GitHub Release or a deploy made from the tag is not undone; remove it yourself (`gh release delete <tag>`).
+
+## Doctor
+
+```sh
+release doctor              # why release would not work here; changes nothing
+release doctor --json       # the same as a JSON list of {name, status, message, fix}
+```
+
+Each line is `ok`, `warn` or `FAIL`, with what to do next. It checks:
+
+- **Tools:** `git`, `uv` (connectors and `release update`), and `gh` plus `gh auth status` when the `github-release` connector is installed.
+- **Install:** `source.toml` (or the uv receipt) points at a git clone, so `release update` works, and the installed version against the clone's `pyproject.toml`.
+- **Global config:** `connectors.toml`, `release.toml` and `source.toml` parse. Every installed connector resolves: external ones need their environment and an entry point that loads (doctor does not run the connector).
+- **Project** (when `.release` or `release.toml` is in the current directory): the config parses, the adapter reads the version, the directory is a git repo on a branch, `origin` is reachable and the branch is not behind it (doctor asks origin with `git ls-remote`; it never fetches), and the project's connector overrides name installed connectors.
+
+The exit code is 1 if any line fails. Warnings do not change it.
 
 ## CI and scripts
 
