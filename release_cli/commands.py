@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import getpass
 import hashlib
 import json
 import re
@@ -16,6 +17,7 @@ from typing import Any
 
 from release_cli import adapters, cursor_review, doctor, github_release, gitops, hotfix, prompts, update
 from release_cli import connectors as cx
+from release_cli import secrets as secret_store
 from release_cli.adapters.base import AdapterError
 from release_cli.config import (
     LOCAL_NAME,
@@ -30,7 +32,7 @@ from release_cli.config import (
 from release_cli.ui import alert, fail, info, warn
 from release_cli.versioning import PlanError, parse
 
-COMMANDS = ("connector", "connectors", "hook", "edit", "update", "status", "undo", "notes", "history", "doctor", "hotfix")
+COMMANDS = ("connector", "connectors", "hook", "edit", "update", "status", "undo", "notes", "history", "doctor", "hotfix", "secret")
 GITHUB_URL = re.compile(r"^(https://[^/@\s]+/[^/@\s]+/[^/@\s]+?)(?:\.git)?/?(?:@(\S+))?$")
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 SLACK_WARNING = (
@@ -63,8 +65,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     connector = sub.add_parser("connector", help="install and manage connectors (global, ~/.config/release/connectors.toml)")
     csub = connector.add_subparsers(dest="action", required=True)
-    add = csub.add_parser("add", help="install from a GitHub URL (pin with @ref) or add a built-in (cursor-review, github-release)")
-    add.add_argument("target", help="https://github.com/org/repo[@ref], cursor-review, or github-release")
+    add = csub.add_parser("add", help="install from a GitHub URL (pin with @ref) or add a built-in (cursor-review, github-release, jira)")
+    add.add_argument("target", help="https://github.com/org/repo[@ref], cursor-review, github-release, or jira")
     _defaults_flag(add)
     csub.add_parser("ls", help="list installed connectors, order, and installed SHA")
     update = csub.add_parser("update", help="reinstall a connector from its source (explicit; never during a release)")
@@ -112,6 +114,13 @@ def build_parser() -> argparse.ArgumentParser:
 
     dr = sub.add_parser("doctor", help="check why release would not work here (tools, install, connectors, project); changes nothing")
     dr.add_argument("--json", action="store_true", help="print the checks as a JSON list")
+    sec = sub.add_parser("secret", help="keep a token or webhook URL in the OS keychain (never in a config file)")
+    sec_sub = sec.add_subparsers(dest="action", required=True)
+    sec_set = sec_sub.add_parser("set", help="store a secret; the value is typed hidden, never an argument")
+    sec_set.add_argument("name", help="e.g. jira-token")
+    sec_rm = sec_sub.add_parser("rm", help="remove a secret")
+    sec_rm.add_argument("name")
+    sec_sub.add_parser("ls", help="list secret names (never values)")
     hist = sub.add_parser("history", help="releases of this repo, newest first, with what each connector did")
     hist.add_argument("--limit", type=int, default=10, metavar="N", help="how many releases to show (default 10)")
     hist.add_argument("--finals", action="store_true", help="finals only, no release candidates")
@@ -149,6 +158,8 @@ def main(argv: list[str]) -> None:
             status(Path.cwd(), as_json=ns.json, fetch=not ns.no_fetch)
         elif ns.command == "doctor":
             doctor.main_exit(Path.cwd(), as_json=ns.json)
+        elif ns.command == "secret":
+            secret_command(ns)
         elif ns.command == "history":
             history(Path.cwd(), limit=ns.limit, finals=ns.finals, as_json=ns.json)
         elif ns.command == "undo":
@@ -161,10 +172,30 @@ def main(argv: list[str]) -> None:
             hook_add(Path.cwd(), when=ns.when, cmd=ns.cmd, url=ns.url, default=ns.default == "y", team=ns.team)
         else:
             edit(Path.cwd(), ns.words)
-    except (cx.ConnectorError, ConfigError, gitops.GitError, prompts.PromptError, update.UpdateError) as exc:
+    except (cx.ConnectorError, ConfigError, gitops.GitError, prompts.PromptError, update.UpdateError, secret_store.SecretError) as exc:
         fail(str(exc))
     except EOFError:
         fail("no answer (stdin closed); run from a terminal or with --defaults")
+
+
+# ---------- secret ----------
+
+
+def secret_command(ns: argparse.Namespace) -> None:
+    """set|rm|ls. Prints names and outcomes only; a value is read with getpass and never echoed."""
+    if ns.action == "ls":
+        for name in secret_store.names():
+            print(name)
+        return
+    secret_store.check_name(ns.name)
+    if ns.action == "rm":
+        if not secret_store.rm(ns.name):
+            fail(f"no secret named {ns.name}")
+        info(f"removed {ns.name}")
+        return
+    value = getpass.getpass(f"{ns.name}: ")
+    where = secret_store.set_(ns.name, value.strip())
+    info(f"stored {ns.name} in the {where}")
 
 
 # ---------- update ----------
@@ -247,9 +278,9 @@ def install(url: str, sha: str) -> list[dict[str, str]]:
     return [ep for ep in found if _norm_url(ep["url"]) == _norm_url(url)]
 
 
-def _ask_position(name: str, size: int, *, defaults: bool, ask: prompts.Ask) -> int:
+def _ask_position(name: str, size: int, *, defaults: bool, ask: prompts.Ask, default: int | None = None) -> int:
     while True:
-        raw = prompts.ask_text(f"Position of {name} in the order (1-{size + 1})", str(size + 1), defaults=defaults, ask=ask)
+        raw = prompts.ask_text(f"Position of {name} in the order (1-{size + 1})", str(default or size + 1), defaults=defaults, ask=ask)
         if raw.isdigit() and 1 <= int(raw) <= size + 1:
             return int(raw) - 1
 
@@ -262,8 +293,12 @@ def register(
     break_default: bool,
     defaults: bool,
     ask: prompts.Ask = input,
+    position: int | None = None,
 ) -> list[str]:
-    """Add or refresh connectors in the global config. Existing ones keep their position and flags."""
+    """Add or refresh connectors in the global config. Existing ones keep their position and flags.
+
+    `position` (1-based) is the default offered for a new connector; the end of the order otherwise.
+    """
     added: list[str] = []
     for name in names:
         cx.check_name(name)
@@ -273,7 +308,7 @@ def register(
                 raise cx.ConnectorError(f"{name} is already installed from {entry.get('source') or 'built-in'}; remove it first")
             entry.update(base)
             continue
-        pos = _ask_position(name, len(g["order"]), defaults=defaults, ask=ask)
+        pos = _ask_position(name, len(g["order"]), defaults=defaults, ask=ask, default=position)
         boe = prompts.ask_bool(f"break_on_error for {name} (stop the chain when it fails)?", break_default, defaults=defaults, ask=ask)
         enabled = prompts.ask_bool(f"Enable {name}?", True, defaults=defaults, ask=ask)
         g["connectors"][name] = {**base, "enabled": enabled, "break_on_error": boe}
@@ -289,7 +324,10 @@ def connector_add(target: str, *, defaults: bool, ask: prompts.Ask = input) -> N
         base: dict[str, Any] = {"builtin": True}
         if target not in g["connectors"] and target in cx.BUILTIN_CONFIG:
             base["config"] = dict(cx.BUILTIN_CONFIG[target])
-        register(g, [target], base, break_default=False, defaults=defaults, ask=ask)
+        # jira gates the deploy: it goes before the first deploy connector, and a failure must stop the chain
+        deploy = next((i for i, n in enumerate(g["order"]) if "deploy" in n), None) if target == "jira" else None
+        position = None if deploy is None else deploy + 1
+        register(g, [target], base, break_default=target == "jira", defaults=defaults, ask=ask, position=position)
         cx.save_global(g)
         info(f"{target}: built in, order {g['order'].index(target) + 1}")
         return

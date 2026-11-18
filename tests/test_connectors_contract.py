@@ -290,3 +290,38 @@ def test_builtin_github_release_runs_in_the_chain_and_skips_non_github(project: 
     ok, state = run(project)
     assert ok and state == {}
     assert "skipping github-release: does not apply to this project: the remote is not on github.com" in capsys.readouterr().out
+
+
+def test_multi_answer_reaches_run_as_a_list_and_dry_run_lists_options(project: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    install_fakes(("a", "multi"))
+    run(project, dry_run=True)
+    out = capsys.readouterr().out
+    assert "ABC-1 (ABC-1 Fix login)" in out and "ABC-3" in out and "[default: ABC-1, ABC-2]" in out
+    ok, _ = run(project, ["+XYZ-7 -ABC-2", ""])
+    assert ok
+    assert run_requests(project, "a")[0]["answers"] == {"issues": ["ABC-1", "XYZ-7"]}
+
+
+def test_multi_defaults_and_closed_stdin(project: Path) -> None:
+    install_fakes(("a", "multi"))
+    ok, _ = run(project, defaults=True)
+    assert ok and run_requests(project, "a")[0]["answers"] == {"issues": ["ABC-1", "ABC-2"]}
+
+    def closed(_prompt: str) -> str:
+        raise EOFError
+
+    cfg = load(project)
+    assert not commands.post_push(project, cfg, "1.5.0-rc0", "abc123", defaults=False, dry_run=False, ask=closed)
+    state = connectors.load_state(project.name, "1.5.0-rc0")["connectors"]
+    assert state["a"]["status"] == "failed" and "stdin closed" in state["a"]["error"]
+
+
+def test_final_refuses_a_chain_where_jira_comes_after_the_deploy(project: Path) -> None:
+    # A project `order` that leaves jira out puts it after the deploy; the platform would get a prd deploy first.
+    install_fakes(("platform-deploy", "echo"), ("jira", "echo"))
+    cfg = load(project)
+    assert cfg is not None
+    ok = commands.post_push(project, cfg, "1.5.0", "abc123", defaults=True, dry_run=False, ask=lambda _p: "")
+    assert not ok and calls(project) == []
+    rc = commands.post_push(project, cfg, "1.5.0-rc0", "abc123", defaults=True, dry_run=False, ask=lambda _p: "")
+    assert rc and [c["request"]["connector"] for c in calls(project) if c["action"] == "run"] == ["platform-deploy", "jira"]
