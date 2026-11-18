@@ -30,6 +30,8 @@ class FakeJira:
         self.versions: list[dict[str, Any]] = []
         self.log: list[tuple[str, str]] = []
         self.reject_auth = False
+        self.redirect: str | None = None
+        self.html = False
 
     def add(self, key: str, status: str, summary: str = "does a thing") -> None:
         self.issues[key] = {"key": key, "fields": {"summary": summary, "status": {"name": status}, "fixVersions": []}}
@@ -76,6 +78,18 @@ def jira(monkeypatch: pytest.MonkeyPatch) -> Iterator[FakeJira]:
     class Handler(BaseHTTPRequestHandler):
         def _serve(self) -> None:
             raw = self.rfile.read(int(self.headers.get("Content-Length") or 0))
+            if fake.html:  # a proxy or SSO page in front of Jira
+                self.send_response(200)
+                self.send_header("Content-Length", "15")
+                self.end_headers()
+                self.wfile.write(b"<html>hi</html>")
+                return
+            if fake.redirect:
+                self.send_response(302)
+                self.send_header("Location", fake.redirect)
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return
             status, payload = fake.handle(self.command, self.path, json.loads(raw) if raw else {})
             if status == 401:  # a hostile server may echo what it received
                 payload["echo"] = self.headers.get("Authorization")
@@ -185,10 +199,37 @@ def test_token_never_reaches_output_even_when_jira_echoes_it(jira: FakeJira, tmp
         assert TOKEN not in text and basic not in text and basic.split()[1] not in text
 
 
-def test_not_configured_does_not_apply_and_says_how_to_set_it(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize(("mode", "version", "blocked"), [("rc", "1.0.0-rc1", False), ("fv", "1.0.0", True)])
+def test_not_configured_skips_an_rc_and_blocks_a_final(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mode: str, version: str, blocked: bool) -> None:
+    # A final must not reach the deploy with the Jira version unreleased because the token is missing on this machine.
     monkeypatch.setattr(jc.secrets, "get", lambda name: None)  # never the real keychain
-    resp = parse_questions(jc.questions(req(tmp_path)))
-    assert not resp.applies and "release secret set jira-token" in (resp.reason or "")
+    resp = parse_questions(jc.questions(req(tmp_path, mode=mode, version=version)))
+    assert not resp.applies and resp.blocked is blocked and "release secret set jira-token" in (resp.reason or "")
+
+
+def test_token_is_not_sent_to_a_redirect_target(jira: FakeJira, tmp_path: Path) -> None:
+    # urllib copies the Authorization header onto a redirect, to any host and over plain http.
+    seen: list[str | None] = []
+
+    class Elsewhere(BaseHTTPRequestHandler):
+        def do_GET(self) -> None:
+            seen.append(self.headers.get("Authorization"))
+            self.send_response(200)
+            self.send_header("Content-Length", "2")
+            self.end_headers()
+            self.wfile.write(b"[]")
+
+        def log_message(self, *args: Any) -> None:
+            pass
+
+    other = HTTPServer(("127.0.0.1", 0), Elsewhere)
+    threading.Thread(target=other.serve_forever, daemon=True).start()
+    jira.redirect = f"http://127.0.0.1:{other.server_port}/steal"
+    jira.add("ABC-1", "Code Review Approved")
+    result = run_ok(jc.run(req(tmp_path, answers={"issues": ["ABC-1"]})))
+    other.shutdown()
+
+    assert not result["ok"] and seen == []
 
 
 @pytest.fixture
@@ -240,3 +281,9 @@ def test_first_time_asks_project_and_transition_and_ticks_by_the_answered_projec
     issues = parsed.items[2]
     assert issues.default_for({"project_key": "ABC"}) == ["ABC-2", "ABC-3"]
     assert issues.default_for({"project_key": "XYZ"}) == ["XYZ-7"]
+
+
+def test_non_json_answer_skips_an_rc_instead_of_crashing(jira: FakeJira, repo: Path) -> None:
+    jira.html = True
+    resp = parse_questions(jc.questions(req(repo, mode="rc", version="1.1.0-rc1")))
+    assert not resp.applies and not resp.blocked and "not JSON" in (resp.reason or "")

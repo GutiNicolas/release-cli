@@ -30,7 +30,7 @@ TOKEN_SECRET = "jira-token"
 KEY_RE = re.compile(r"\b[A-Z][A-Z0-9_]+-\d+\b")
 PROJECT_RE = "[A-Z][A-Z0-9_]+"
 DEFAULT_QA_STATUSES = ["Code Review", "Code Review Approved"]
-DELIVERED_HINT = "entregado"
+DELIVERED_HINTS = ("delivered", "entregado")  # default transition: the one leading to a status named like this
 HTTP_TIMEOUT = 15.0
 LOOKUP_WORKERS = 8
 LOCAL_HOSTS = ("localhost", "127.0.0.1", "::1")
@@ -48,6 +48,16 @@ class JiraError(RuntimeError):
         self.status = status
 
 
+class _NoRedirect(urlrequest.HTTPRedirectHandler):
+    """urllib copies the Authorization header onto a redirect (any host, even plain http): refuse redirects."""
+
+    def redirect_request(self, *args: Any, **kwargs: Any) -> None:
+        return None
+
+
+_OPENER = urlrequest.build_opener(_NoRedirect)
+
+
 class Jira:
     def __init__(self, base_url: str, email: str, token: str) -> None:
         self.base_url = base_url.rstrip("/")
@@ -63,14 +73,17 @@ class Jira:
             headers={"Authorization": self._auth, "Accept": "application/json", "Content-Type": "application/json"},
         )
         try:
-            with urlrequest.urlopen(req, timeout=HTTP_TIMEOUT) as resp:  # noqa: S310 (scheme checked in `client`)
+            with _OPENER.open(req, timeout=HTTP_TIMEOUT) as resp:  # noqa: S310 (scheme checked in `client`)
                 raw = resp.read()
         except urlerror.HTTPError as exc:
             detail = exc.read().decode("utf-8", "replace").strip()
             raise JiraError(self._clean(f"{method} {path}: HTTP {exc.code} {detail[:300]}"), exc.code) from None
         except (urlerror.URLError, OSError, TimeoutError) as exc:
             raise JiraError(self._clean(f"{method} {path}: {getattr(exc, 'reason', exc)}")) from None
-        return json.loads(raw) if raw.strip() else None
+        try:
+            return json.loads(raw) if raw.strip() else None
+        except ValueError:
+            raise JiraError(f"{method} {path}: the answer is not JSON (a proxy or login page in front of Jira?)") from None
 
     def _clean(self, text: str) -> str:
         return text.replace(self._token, "***").replace(self._auth, "***")
@@ -152,7 +165,7 @@ def _transition_options(jira: Jira, keys: list[str]) -> tuple[list[str], str | N
             name = str(t.get("name") or "")
             if name and name not in names:
                 names.append(name)
-            if name and guess is None and DELIVERED_HINT in str((t.get("to") or {}).get("name") or "").lower():
+            if name and guess is None and any(h in str((t.get("to") or {}).get("name") or "").lower() for h in DELIVERED_HINTS):
                 guess = name
     return names, guess
 
@@ -164,8 +177,8 @@ def questions(req: dict[str, Any]) -> dict[str, Any]:
     config = req.get("config") or {}
     final = req.get("mode") == "fv"
     jira = client(config)
-    if isinstance(jira, str):
-        return {"protocol": 1, "applies": False, "blocked": False, "reason": jira, "questions": []}
+    if isinstance(jira, str):  # a final must not reach the deploy with its Jira version unreleased
+        return {"protocol": 1, "applies": False, "blocked": final, "reason": jira, "questions": []}
     try:
         keys = commit_keys(req)
         info = _lookup(jira, keys)
