@@ -116,6 +116,11 @@ def tags() -> list[str]:
     return _out(["git", "tag", "--list"]).split()
 
 
+def tag_date(name: str) -> str:
+    """Creation date of the tag (ISO 8601): the tagger date for an annotated tag, the commit date for a lightweight one."""
+    return _out(["git", "for-each-ref", "--format=%(creatordate:iso-strict)", f"refs/tags/{name}"])
+
+
 def delete_remote_tags(names: list[str]) -> None:
     _out(["git", "push", "--atomic", "origin", "--delete", *(f"refs/tags/{name}" for name in names)])
 
