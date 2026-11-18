@@ -30,7 +30,7 @@ from release_cli.config import (
 from release_cli.ui import alert, fail, info, warn
 from release_cli.versioning import PlanError, parse
 
-COMMANDS = ("connector", "connectors", "hook", "edit", "update", "status", "undo", "notes", "doctor")
+COMMANDS = ("connector", "connectors", "hook", "edit", "update", "status", "undo", "notes", "history", "doctor")
 GITHUB_URL = re.compile(r"^(https://[^/@\s]+/[^/@\s]+/[^/@\s]+?)(?:\.git)?/?(?:@(\S+))?$")
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 SLACK_WARNING = (
@@ -112,6 +112,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     dr = sub.add_parser("doctor", help="check why release would not work here (tools, install, connectors, project); changes nothing")
     dr.add_argument("--json", action="store_true", help="print the checks as a JSON list")
+    hist = sub.add_parser("history", help="releases of this repo, newest first, with what each connector did")
+    hist.add_argument("--limit", type=int, default=10, metavar="N", help="how many releases to show (default 10)")
+    hist.add_argument("--finals", action="store_true", help="finals only, no release candidates")
+    hist.add_argument("--json", action="store_true", help="print one JSON object")
 
     undo = sub.add_parser("undo", help="delete a pushed release candidate's tags (origin and local) after confirming")
     undo.add_argument("tag", help="X.Y.Z-rcN or <artifact>-X.Y.Z-rcN")
@@ -142,6 +146,8 @@ def main(argv: list[str]) -> None:
             status(Path.cwd(), as_json=ns.json, fetch=not ns.no_fetch)
         elif ns.command == "doctor":
             doctor.main_exit(Path.cwd(), as_json=ns.json)
+        elif ns.command == "history":
+            history(Path.cwd(), limit=ns.limit, finals=ns.finals, as_json=ns.json)
         elif ns.command == "undo":
             undo(Path.cwd(), ns.tag, force=ns.force)
         elif ns.command == "notes":
@@ -508,6 +514,49 @@ def status(cwd: Path, *, as_json: bool, fetch: bool) -> None:
     info(f"last tag: {data['last_tag'] or 'none'}")
     for name, state in data["connectors"].items():
         info(f"  {name}: {state}")
+
+
+def history_data(cwd: Path, *, limit: int, finals: bool) -> dict[str, Any]:
+    """Version tags newest first, each joined with the connector runs saved on this machine. Read-only."""
+    if limit < 1:
+        raise ConfigError("--limit must be at least 1")
+    gitops.current_repo()
+    repo = cx.repo_name(gitops.remote_url(), cwd)
+    versions = [(github_release._key(v), tag, v) for tag in gitops.tags() if (v := github_release._plain(tag)) is not None]
+    versions = [item for item in versions if not (finals and item[2].rc is not None)]
+    releases = []
+    for _, tag, version in sorted(versions, reverse=True)[:limit]:
+        state = cx.load_state(repo, tag)
+        runs = None
+        if state is not None:
+            runs = {
+                name: {key: entry.get(key) for key in ("status", "updated_at", "error")}
+                | ({"resume": cx.resume_hint(tag, name)} if entry.get("status") != "ok" else {})
+                for name, entry in state.get("connectors", {}).items()
+            }
+        releases.append(
+            {"version": tag, "final": version.rc is None, "date": gitops.tag_date(tag), "commit": gitops.tag_commit(tag), "connectors": runs}
+        )
+    return {"repo": repo, "releases": releases}
+
+
+def history(cwd: Path, *, limit: int, finals: bool, as_json: bool) -> None:
+    data = history_data(cwd, limit=limit, finals=finals)
+    if as_json:
+        print(json.dumps(data, indent=2))
+        return
+    if not data["releases"]:
+        info(f"no {'final ' if finals else ''}version tags in {data['repo']}")
+        return
+    for rel in data["releases"]:
+        info(f"{rel['version']}  {rel['date'][:10]}  {rel['commit'][:7]}{'' if rel['final'] else '  (rc)'}")
+        if rel["connectors"] is None:
+            info("  no connector runs on this machine")
+        for name, entry in (rel["connectors"] or {}).items():
+            err = f" - {entry['error']}" if entry.get("error") else ""
+            info(f"  {name}: {entry['status']} at {entry.get('updated_at') or '?'}{err}")
+            if "resume" in entry:
+                info(f"    resume: {entry['resume']}")
 
 
 def undo(cwd: Path, tag: str, *, force: bool, ask: prompts.Ask = input) -> None:
