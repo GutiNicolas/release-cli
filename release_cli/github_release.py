@@ -12,6 +12,7 @@ Under `release --dry-run` it calls no `gh` and only lists what it would upload.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import shutil
@@ -149,13 +150,29 @@ def _fail(error: str, **result: Any) -> dict[str, Any]:
     return {"protocol": 1, "ok": False, "error": error, "result": result}
 
 
-def _uploaded(call: Callable[..., subprocess.CompletedProcess[str]], tag: str) -> dict[str, int]:
-    """name -> size of the assets already on the release; empty when gh cannot say (then everything is uploaded again)."""
+def _uploaded(call: Callable[..., subprocess.CompletedProcess[str]], tag: str) -> dict[str, str | None]:
+    """name -> sha256 hex of the assets already on the release (None when gh gives no digest for it); empty when gh cannot say.
+
+    The size is never trusted: a rebuilt archive can have the same size and other bytes."""
     proc = call("release", "view", tag, "--json", "assets")
     try:
-        return {a["name"]: a["size"] for a in json.loads(proc.stdout)["assets"]} if proc.returncode == 0 else {}
-    except (ValueError, KeyError, TypeError):
+        if proc.returncode != 0:
+            return {}
+        out: dict[str, str | None] = {}
+        for a in json.loads(proc.stdout)["assets"]:
+            digest = a.get("digest")
+            out[a["name"]] = digest.removeprefix("sha256:").lower() if isinstance(digest, str) and digest.startswith("sha256:") else None
+        return out
+    except (ValueError, KeyError, TypeError, AttributeError):
         return {}
+
+
+def _file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as fh:
+        for chunk in iter(lambda: fh.read(1 << 20), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def _dry_run(req: dict[str, Any]) -> dict[str, Any]:
@@ -209,7 +226,7 @@ def run(req: dict[str, Any]) -> dict[str, Any]:
             result = {"published": True, "url": url, "prerelease": prerelease}
         if manifest:
             have = _uploaded(call, tag) if existing.returncode == 0 else {}
-            todo = [(name, path) for name, path, size in assets if name not in have or (size is not None and have[name] != size)]
+            todo = [(name, path) for name, path, _ in assets if have.get(name) is None or have[name] != _file_sha256(path)]
             for name, path in todo:
                 uploaded = call("release", "upload", tag, str(path), "--clobber")
                 if uploaded.returncode != 0:

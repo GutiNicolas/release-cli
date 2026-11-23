@@ -107,7 +107,8 @@ def fake_gh(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
         "    name = os.path.basename(args[3])\n"
         "    if name == os.environ.get('FAKE_GH_FAIL_UPLOAD'):\n"
         "        print('HTTP 502', file=sys.stderr); sys.exit(1)\n"
-        "    assets = [a for a in assets if a['name'] != name] + [{'name': name, 'size': os.path.getsize(args[3])}]\n"
+        "    assets = [a for a in assets if a['name'] != name] + [{'name': name, 'size': os.path.getsize(args[3])}\n"
+        "        | ({} if os.environ.get('FAKE_GH_NO_DIGEST') else {'digest': 'sha256:' + __import__('hashlib').sha256(open(args[3], 'rb').read()).hexdigest()})]\n"
         "    json.dump(assets, open(assets_file, 'w')); sys.exit(0)\n"
         "if args[:2] == ['release', 'view']:\n"
         f"    if os.path.exists({str(tmp_path / 'created')!r}):\n"
@@ -208,15 +209,26 @@ def test_run_uploads_every_manifest_asset_but_the_npm_tgz_and_resume_sends_only_
     assert resumed.result["uploaded"] == ["install.sh"]
 
 
-def test_run_reuploads_an_asset_whose_size_differs(repo: Path, fake_gh: Path, tmp_path: Path) -> None:
+def test_run_reuploads_an_asset_whose_content_differs_even_at_the_same_size(repo: Path, fake_gh: Path, tmp_path: Path) -> None:
     req = {**_req(repo, "1.0.0-rc1"), "prior": _manifest_prior(tmp_path)}
     assert gr.run(req)["ok"]
     assert len(_uploads(fake_gh)) == 4
-    assets = json.loads((tmp_path / "assets.json").read_text())
-    next(a for a in assets if a["name"] == "checksums.txt")["size"] = 1  # a truncated upload
-    (tmp_path / "assets.json").write_text(json.dumps(assets))
     fake_gh.unlink()
-    assert gr.run(req)["result"]["uploaded"] == ["checksums.txt"]
+    assert gr.run(req)["result"]["uploaded"] == []  # nothing changed: nothing sent
+    fake_gh.unlink()
+    archive = tmp_path / "dist" / "app_1.0.0_linux_amd64.tar.gz"
+    rebuilt = bytes(reversed(archive.read_bytes()))  # a resume rebuilt it: same size, other bytes
+    assert rebuilt != archive.read_bytes()
+    archive.write_bytes(rebuilt)
+    assert gr.run(req)["result"]["uploaded"] == [archive.name]
+
+
+def test_run_reuploads_everything_when_the_release_gives_no_digest(repo: Path, fake_gh: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("FAKE_GH_NO_DIGEST", "1")
+    req = {**_req(repo, "1.0.0-rc1"), "prior": _manifest_prior(tmp_path)}
+    assert gr.run(req)["ok"]
+    fake_gh.unlink()
+    assert len(gr.run(req)["result"]["uploaded"]) == 4  # the size alone proves nothing
 
 
 def test_run_without_a_good_go_build_uploads_nothing(repo: Path, fake_gh: Path, tmp_path: Path) -> None:
