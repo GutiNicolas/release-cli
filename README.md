@@ -169,6 +169,7 @@ release connector add cursor-review                                             
 release connector add github-release                                                        # built in
 release connector add go-build                                                              # built in
 release connector add jira                                                                  # built in
+release connector add npm-publish                                                           # built in
 release connector add slack-notify                                                          # built in
 release connector ls        # order, enabled, break_on_error, installed commit SHA
 release connector update platform-build     # explicit; only a connector installed from a URL
@@ -250,6 +251,24 @@ archive_files = ["LICENSE", "README.md"]      # added next to the binary when pr
 Every build uses `-trimpath` and `GOFLAGS=-mod=readonly`. The output, in `dist/<version>/` (`dist/` must be git-ignored; the connector refuses otherwise), is one `<binary>_<version>_<os>_<arch>.tar.gz` per target, `checksums.txt` (`shasum -a 256 -c checksums.txt` verifies it) and `manifest.json`, which lists every file with its sha256 and size for the connectors that publish them. If any target fails to compile, nothing is written and the connector fails with the compiler output.
 
 `release --dry-run` runs it too, building HEAD into a temporary folder it prints (`DRY-RUN DIR`) and publishing nothing, so the artifacts can be checked before the tag exists.
+
+### npm-publish
+
+Optional, built in: `release connector add npm-publish`, after `go-build` in the order. It publishes the app's npm package (for example a wrapper that downloads the binary) with **the same version as the release**, without touching the tracked `package.json`: the package folder is copied to a temp dir, its `version` is set there, `npm pack` writes `<name>-<version>.tgz` into the `go-build` output (`@scope/name` becomes `scope-name`), and `npm publish <tgz>` uploads it. `npm` must be on `PATH`.
+
+```toml
+# .release
+[connectors.npm-publish]
+package_dir = "packages/hello-js"      # folder with the package.json, relative to the repo root
+access = "public"                      # or "restricted" (default "public")
+rc_dist_tag = "next"                   # RCs go under this tag, finals under "latest" (default "next")
+# token_secret = "npm-token"           # secret name; see below
+# registry = "https://registry.npmjs.org/"
+```
+
+Release candidates (`0.1.0-rc0`) are published under `next`, so `npm install` keeps resolving the last final; finals under `latest`. Authentication: set the token once with `release secret set npm-token` (it is written to a temporary `.npmrc` for the one command and never logged), or leave it unset to use your own `npm login`. If you name a `token_secret` that is not set, the connector fails with the `release secret set <name>` command to run. If the version is already on the registry (a resumed run), the connector succeeds with `published: false` and uploads nothing.
+
+`release --dry-run` runs it too: it packs the tarball into the dry-run folder and runs `npm publish --dry-run`, so nothing reaches the registry.
 
 ### jira
 

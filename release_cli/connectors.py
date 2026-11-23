@@ -41,6 +41,7 @@ BUILTINS = {
     "github-release": "release_cli.github_release",
     "go-build": "release_cli.go_build",
     "jira": "release_cli.jira_connector",
+    "npm-publish": "release_cli.npm_publish",
     "slack-notify": "release_cli.slack_notify",
 }
 # connectors.toml [connectors.<name>.config] written when a built-in is first added.
