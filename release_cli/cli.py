@@ -289,6 +289,7 @@ def _release(ns: argparse.Namespace) -> None:
 
     summary = {"tool": cfg.tool, "artifact": artifact, "version": release_ver, "next_snapshot": snapshot_ver, "tags": tags}
     if ns.dry_run:
+        dry_report: dict = {}
         run_hooks(cfg.hooks, "before", defaults=False, skip=False, dry_run=True, log=info, ask=input)
         preview_cfg_files = _preview_write(adapter, cwd, cfg, release_ver, artifact)
         if not preview_cfg_files:
@@ -302,14 +303,26 @@ def _release(ns: argparse.Namespace) -> None:
                 head = gitops.current_repo().sha
             except gitops.GitError:
                 head = "HEAD"
-            _post_push(cwd, cfg, release_ver, head, ns, dry_run=True)
+            _post_push(cwd, cfg, release_ver, head, ns, dry_run=True, report=dry_report)
+        failed = [name for name, entry in dry_report.get("connectors", {}).items() if entry["status"] != "ok"]
+        if failed:
+            fail(f"dry-run: {', '.join(failed)} did not finish ok; nothing was tagged, pushed or published")
         info("no files written")
         problems = _preflight(tags)
         if problems:
             fail("dry-run: the release would stop before the hooks:\n- " + "\n- ".join(problems))
         info("PREFLIGHT: ok (clean tree, tags free, up to date with origin)")
         result(f"dry-run ok: {artifact} {release_ver} (tags {', '.join(tags)})")
-        emit({**summary, "ok": True, "dry_run": True, "files": sorted(preview_cfg_files)})
+        emit(
+            {
+                **summary,
+                "ok": True,
+                "dry_run": True,
+                "files": sorted(preview_cfg_files),
+                "dry_run_dir": dry_report.get("dir"),
+                "connectors": dry_report.get("connectors", {}),
+            }
+        )
         return
 
     problems = _preflight(tags)
@@ -433,10 +446,14 @@ def cx_state(cwd: Path, release_ver: str) -> dict[str, str]:
     return {name: entry.get("status") for name, entry in state.get("connectors", {}).items()}
 
 
-def _post_push(cwd: Path, cfg: Config, release_ver: str, sha: str, ns: argparse.Namespace, *, dry_run: bool) -> bool:
+def _post_push(
+    cwd: Path, cfg: Config, release_ver: str, sha: str, ns: argparse.Namespace, *, dry_run: bool, report: dict | None = None
+) -> bool:
     try:
-        return commands.post_push(cwd, cfg, release_ver, sha, defaults=ns.defaults, dry_run=dry_run)
+        return commands.post_push(cwd, cfg, release_ver, sha, defaults=ns.defaults, dry_run=dry_run, report=report)
     except (ChainInterrupted, KeyboardInterrupt):
+        if dry_run:
+            fail("interrupted. nothing was tagged, pushed or published", 130)
         fail(f"interrupted. the tags stay pushed. see: release connectors status {cfg.tags.primary(release_ver)}", 130, pushed=True, version=release_ver)
     except (ConnectorError, ConfigError) as exc:
         fail(f"{exc} (release {release_ver} tags are not touched)")

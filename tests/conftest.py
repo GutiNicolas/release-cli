@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -13,6 +14,9 @@ def _isolated_home(tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest
     home = tmp_path_factory.mktemp("home")
     monkeypatch.setenv("XDG_CONFIG_HOME", str(home / "config"))
     monkeypatch.setenv("XDG_DATA_HOME", str(home / "data"))
+    (home / "tmp").mkdir()  # dry runs write under the temp dir
+    monkeypatch.setenv("TMPDIR", str(home / "tmp"))
+    monkeypatch.setattr(tempfile, "tempdir", None)
     return home
 
 

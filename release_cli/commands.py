@@ -420,6 +420,7 @@ def post_push(
     start: str | None = None,
     only: str | None = None,
     ask: prompts.Ask = input,
+    report: dict[str, Any] | None = None,
 ) -> bool:
     """The post-push phase. Returns False when a connector failed. Never resets or deletes tags."""
     conns = cx.resolve(cx.load_global(), cfg.connectors, warn=warn)
@@ -445,7 +446,7 @@ def post_push(
         prior = _prior_from(saved, names[:idx])
     return cx.run_chain(
         context, selected, state=state, prior=prior, cwd=cwd, project=dict(cfg.connectors),
-        defaults=defaults, dry_run=dry_run, log=info, ask=ask, alert=alert,
+        defaults=defaults, dry_run=dry_run, log=info, ask=ask, alert=alert, report=report,
     )
 
 
