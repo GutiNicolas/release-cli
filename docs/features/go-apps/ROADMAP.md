@@ -96,7 +96,7 @@ Results: `github-release` adds `"assets": [names]`; `npm-publish` `{"name", "ver
 **Secrets:** `npm-token` (or the user's `npm login`), `homebrew-tap-token`, `cosign-key` and `cosign-password` (phase 3); names in config, values via `release secret`.
 
 ## Phases and tasks
-<!-- Release PR: release/go-apps-p<n> → main; last reviewed commit: -->
+<!-- Release PR: release/go-apps-p<n> → main; last reviewed commit: 85e66a3 (2026-11-22, 6 findings: 0 critical, 0 high, 1 medium, 5 low) -->
 **Phase 1 release:** `release/go-apps-p1` (cut 2026-11-22), release PR [#20](https://github.com/GutiNicolas/release-cli/pull/20).
 ### Phase 1: Go projects and `v` tags (shippable alone: `release -rc` tags a Go app)
 | Task | Repo | Depends on | Status | PR | Note |
