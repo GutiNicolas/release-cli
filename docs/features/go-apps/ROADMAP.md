@@ -110,9 +110,9 @@ Results: `github-release` adds `"assets": [names]`; `npm-publish` `{"name", "ver
 |---|---|---|---|---|---|
 | [T-03](tasks/T-03.md) Dry-run runs connectors that declare it safe | release-cli | P1 | integrated | [#22](https://github.com/GutiNicolas/release-cli/pull/22) | |
 | [T-04](tasks/T-04.md) `go-build` connector and Go fixture | release-cli | T-03 | integrated | [#24](https://github.com/GutiNicolas/release-cli/pull/24) | |
-| [T-05](tasks/T-05.md) `github-release` uploads the manifest's assets | release-cli | T-04 | todo | | parallel with T-06, T-07 |
-| [T-06](tasks/T-06.md) `npm-publish` connector (lockstep) | release-cli | T-04 | todo | | parallel |
-| [T-07](tasks/T-07.md) `homebrew-tap` connector and install script | release-cli | T-04 | todo | | parallel |
+| [T-05](tasks/T-05.md) `github-release` uploads the manifest's assets | release-cli | T-04 | in progress | | parallel with T-06, T-07 |
+| [T-06](tasks/T-06.md) `npm-publish` connector (lockstep) | release-cli | T-04 | in progress | | parallel |
+| [T-07](tasks/T-07.md) `homebrew-tap` connector and install script | release-cli | T-04 | in progress | | parallel |
 
 ### Phase 3: signed provenance, local (before localci's launch)
 | Task | Repo | Depends on | Status | PR | Note |
