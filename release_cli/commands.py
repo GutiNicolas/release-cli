@@ -66,8 +66,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     connector = sub.add_parser("connector", help="install and manage connectors (global, ~/.config/release/connectors.toml)")
     csub = connector.add_subparsers(dest="action", required=True)
-    add = csub.add_parser("add", help="install from a GitHub URL (pin with @ref) or add a built-in (cursor-review, github-release, jira)")
-    add.add_argument("target", help="https://github.com/org/repo[@ref], cursor-review, github-release, or jira")
+    add = csub.add_parser("add", help="install from a GitHub URL (pin with @ref) or add a built-in (cursor-review, github-release, go-build, jira, slack-notify)")
+    add.add_argument("target", help="https://github.com/org/repo[@ref], cursor-review, github-release, go-build, jira, or slack-notify")
     _defaults_flag(add)
     csub.add_parser("ls", help="list installed connectors, order, and installed SHA")
     update = csub.add_parser("update", help="reinstall a connector from its source (explicit; never during a release)")

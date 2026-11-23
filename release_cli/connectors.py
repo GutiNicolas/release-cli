@@ -39,6 +39,7 @@ STDERR_TAIL = 20
 BUILTINS = {
     "cursor-review": "release_cli.cursor_review",
     "github-release": "release_cli.github_release",
+    "go-build": "release_cli.go_build",
     "jira": "release_cli.jira_connector",
     "slack-notify": "release_cli.slack_notify",
 }

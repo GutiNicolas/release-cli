@@ -1,0 +1,6 @@
+{
+  "name": "@acme/hello",
+  "version": "0.1.0-SNAPSHOT",
+  "description": "Fixture package published next to the Go binary",
+  "license": "MIT"
+}

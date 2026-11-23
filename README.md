@@ -74,7 +74,7 @@ A Go project keeps its version in a plain `VERSION` file at the repo root (`vers
 
 `release --init` in a folder with `go.mod` writes `tool = "go"`, takes the artifact from the last element of the module path (`github.com/acme/localci` is `localci`; a trailing `/v2` is skipped), sets `tag_format = ["v{version}"]` and, after asking, creates `VERSION` with `0.0.0-SNAPSHOT` when it is missing, so the first `release -rc` is `v0.1.0-rc0`. It also offers `go test ./...` as a `before` hook. Commit `VERSION` before the first release.
 
-`-rc`, `-fv`, `--dry-run` and `hotfix` work as for the other tools and create only `v` tags (`v0.1.0-rc0`, `v0.1.0`), the form `go install ...@v0.1.0` and the Go module proxy see. The release does not build anything.
+`-rc`, `-fv`, `--dry-run` and `hotfix` work as for the other tools and create only `v` tags (`v0.1.0-rc0`, `v0.1.0`), the form `go install ...@v0.1.0` and the Go module proxy see. The release itself does not build anything: the [`go-build`](#go-build) connector does.
 
 ### Maven multi-module
 
@@ -167,6 +167,7 @@ release connector add https://github.com/example/release-connector          # la
 release connector add https://github.com/example/release-connector@v0.1.0   # pinned
 release connector add cursor-review                                                         # built in
 release connector add github-release                                                        # built in
+release connector add go-build                                                              # built in
 release connector add jira                                                                  # built in
 release connector add slack-notify                                                          # built in
 release connector ls        # order, enabled, break_on_error, installed commit SHA
@@ -228,6 +229,25 @@ Settings: `release edit` then `global set cursor-review <key> <value>` for `dela
 ### github-release
 
 Optional, built in: `release connector add github-release`. After the push it creates the GitHub Release of the tag with the [GitHub CLI](https://cli.github.com/) (`gh`, installed and logged in with `gh auth login`). Release candidates are marked as pre-releases. The notes are the commits since the previous tag (for a final, since the previous final), without the CLI's own `[manual-release]` commits; `release notes <tag>` prints the same text. It asks once per release (default yes), skips repositories whose `origin` is not on github.com, and on a resume reuses a release that already exists instead of creating a second one.
+
+### go-build
+
+Optional, built in: `release connector add go-build`. For Go apps it cross-compiles the release with plain `go build` (no GoReleaser) after the push, so the binaries always come from the tagged commit. It builds in a temporary `git worktree`, so uncommitted changes never get in, and removes it afterwards. It skips repositories without a `go.mod` at the root. `go` must be on `PATH`.
+
+```toml
+# .release
+[connectors.go-build]
+main = "./cmd/hello"                   # package to build (default ".")
+binary = "hello"                       # default: artifact
+targets = ["darwin/amd64", "darwin/arm64", "linux/amd64", "linux/arm64"]   # default
+ldflags = "-s -w -X main.version={version}"   # default; {version} has no "v"
+cgo = false                            # CGO_ENABLED=0 (default)
+archive_files = ["LICENSE", "README.md"]      # added next to the binary when present
+```
+
+Every build uses `-trimpath` and `GOFLAGS=-mod=readonly`. The output, in `dist/<version>/` (`dist/` must be git-ignored; the connector refuses otherwise), is one `<binary>_<version>_<os>_<arch>.tar.gz` per target, `checksums.txt` (`shasum -a 256 -c checksums.txt` verifies it) and `manifest.json`, which lists every file with its sha256 and size for the connectors that publish them. If any target fails to compile, nothing is written and the connector fails with the compiler output.
+
+`release --dry-run` runs it too, building HEAD into a temporary folder it prints (`DRY-RUN DIR`) and publishing nothing, so the artifacts can be checked before the tag exists.
 
 ### jira
 
