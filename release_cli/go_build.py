@@ -31,6 +31,8 @@ DEFAULT_LDFLAGS = "-s -w -X main.version={version}"
 TARGET_RE = re.compile(r"^[a-z0-9]+/[a-z0-9]+$")
 GO_MISSING = "`go` is not on PATH; install Go (https://go.dev/dl) and make sure `go version` works in this shell"
 ERROR_TAIL = 15
+GITHUB_SLUG = re.compile(r"^(?:https?://(?:[^@/]+@)?github\.com/|ssh://git@github\.com(?::\d+)?/|git@github\.com:)([^/\s]+)/([^/\s]+?)(?:\.git)?/?$")
+INSTALLER = Path(__file__).parent / "templates" / "install.sh"
 
 
 class BuildError(RuntimeError):
@@ -64,6 +66,32 @@ def _settings(req: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(files, list) or not all(isinstance(f, str) and f for f in files):
         raise BuildError("`archive_files` must be a list of file paths")
     return {"binary": binary, "main": main, "targets": list(dict.fromkeys(targets)), "ldflags": ldflags, "cgo": cgo, "files": files}
+
+
+def github_slug(remote_url: Any) -> tuple[str, str] | None:
+    """(owner, repo) of a github.com remote URL, or None for any other remote."""
+    match = GITHUB_SLUG.match(remote_url.strip()) if isinstance(remote_url, str) else None
+    return (match.group(1), match.group(2)) if match else None
+
+
+def download_base(req: dict[str, Any]) -> str | None:
+    """Where the GitHub Release of this tag serves its files; None when the remote is not on github.com."""
+    slug = github_slug(req.get("remote_url"))
+    return f"https://github.com/{slug[0]}/{slug[1]}/releases/download/{tag_of(req)}" if slug else None
+
+
+def _render_installer(dest: Path, base: str, binary: str, version: str, tag: str) -> None:
+    values = {
+        "@BINARY@": binary,
+        "@VERSION@": version,
+        "@TAG_TEMPLATE@": tag.replace(version, "{version}"),
+        "@BASE_URL@": base.rsplit("/", 1)[0],
+    }
+    text = INSTALLER.read_text(encoding="utf-8")
+    for key, value in values.items():
+        text = text.replace(key, value)
+    dest.write_text(text, encoding="utf-8")
+    dest.chmod(0o755)
 
 
 def _git(root: Path, *args: str) -> subprocess.CompletedProcess[str]:
@@ -146,6 +174,12 @@ def _package(src: Path, work: Path, out_dir: Path, req: dict[str, Any], spec: di
     checksums = stage / "checksums.txt"
     checksums.write_text("".join(f"{a['sha256']}  {a['name']}\n" for a in artifacts), encoding="utf-8")
     artifacts.append({"name": "checksums.txt", "kind": "checksums", "sha256": _sha256(checksums), "size": checksums.stat().st_size})
+    if base := download_base(req):
+        installer = stage / "install.sh"
+        _render_installer(installer, base, spec["binary"], version, tag)
+        artifacts.append({"name": "install.sh", "kind": "installer", "sha256": _sha256(installer), "size": installer.stat().st_size})
+    else:
+        print("go-build: the remote is not on github.com, so install.sh is not rendered", file=sys.stderr)
     manifest = {"app": req.get("artifact") or spec["binary"], "version": version, "tag": tag, "commit": sha, "dir": str(out_dir), "artifacts": artifacts}
     (stage / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     # every target built: only now does anything reach the output folder, so a failure leaves no partial manifest

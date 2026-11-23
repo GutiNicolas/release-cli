@@ -40,6 +40,7 @@ BUILTINS = {
     "cursor-review": "release_cli.cursor_review",
     "github-release": "release_cli.github_release",
     "go-build": "release_cli.go_build",
+    "homebrew-tap": "release_cli.homebrew_tap",
     "jira": "release_cli.jira_connector",
     "npm-publish": "release_cli.npm_publish",
     "slack-notify": "release_cli.slack_notify",

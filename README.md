@@ -168,6 +168,7 @@ release connector add https://github.com/example/release-connector@v0.1.0   # pi
 release connector add cursor-review                                                         # built in
 release connector add github-release                                                        # built in
 release connector add go-build                                                              # built in
+release connector add homebrew-tap                                                          # built in
 release connector add jira                                                                  # built in
 release connector add npm-publish                                                           # built in
 release connector add slack-notify                                                          # built in
@@ -252,6 +253,8 @@ Every build uses `-trimpath` and `GOFLAGS=-mod=readonly`. The output, in `dist/<
 
 `release --dry-run` runs it too, building HEAD into a temporary folder it prints (`DRY-RUN DIR`) and publishing nothing, so the artifacts can be checked before the tag exists.
 
+When the remote is on github.com it also renders `install.sh` next to the archives (listed in the manifest as kind `installer`), so users can install a release with `curl -fsSL <release url>/install.sh | sh`. The script is POSIX `sh`: it detects Linux or macOS and amd64 or arm64, downloads the archive and `checksums.txt` from the release, checks the archive's sha256 (`sha256sum` or `shasum -a 256`) and refuses to install on a mismatch. `VERSION` (default: the release the script came from) and `PREFIX` (default `/usr/local`, the binary goes to `PREFIX/bin`) can be set in the environment: `curl -fsSL <release url>/install.sh | PREFIX=$HOME/.local sh`.
+
 ### npm-publish
 
 Optional, built in: `release connector add npm-publish`, after `go-build` in the order. It publishes the app's npm package (for example a wrapper that downloads the binary) with **the same version as the release**, without touching the tracked `package.json`: the package folder is copied to a temp dir, its `version` is set there, `npm pack` writes `<name>-<version>.tgz` into the `go-build` output (`@scope/name` becomes `scope-name`), and `npm publish <tgz>` uploads it. `npm` must be on `PATH`.
@@ -269,6 +272,20 @@ rc_dist_tag = "next"                   # RCs go under this tag, finals under "la
 Release candidates (`0.1.0-rc0`) are published under `next`, so `npm install` keeps resolving the last final; finals under `latest`. Authentication: set the token once with `release secret set npm-token` (it is written to a temporary `.npmrc` for the one command and never logged), or leave it unset to use your own `npm login`. If you name a `token_secret` that is not set, the connector fails with the `release secret set <name>` command to run. If the version is already on the registry (a resumed run), the connector succeeds with `published: false` and uploads nothing.
 
 `release --dry-run` runs it too: it packs the tarball into the dry-run folder and runs `npm publish --dry-run`, so nothing reaches the registry.
+
+### homebrew-tap
+
+Optional, built in: `release connector add homebrew-tap`, placed after `go-build` (and `github-release`) in the chain. For a final release it renders a Homebrew formula from the `go-build` manifest (the url and sha256 of every darwin and linux archive, `bin.install`, and a `test do` that runs `<binary> version`) and commits it to `Formula/<binary>.rb` in your tap repository with `gh api`, so `brew install owner/tap/<binary>` works. Release candidates are skipped and say so. It skips repositories whose `origin` is not on github.com, and a resume does not commit again when the tap already holds the same formula.
+
+```toml
+# .release
+[connectors.homebrew-tap]
+tap = "acme/homebrew-tap"              # owner/repo of the tap
+token_secret = "homebrew-tap-token"    # default; a token that can write to the tap (contents: read and write)
+desc = "Hello command line tool"       # optional; the formula's description
+```
+
+Store the token once with `release secret set homebrew-tap-token`; the [GitHub CLI](https://cli.github.com/) (`gh`) must be on `PATH`. `release --dry-run` renders the formula into the dry-run folder (`<binary>.rb`) and commits nothing.
 
 ### jira
 
