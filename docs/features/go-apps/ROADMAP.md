@@ -117,7 +117,7 @@ Results: `github-release` adds `"assets": [names]`; `npm-publish` `{"name", "ver
 ### Phase 3: signed provenance, local (before localci's launch)
 | Task | Repo | Depends on | Status | PR | Note |
 |---|---|---|---|---|---|
-| [T-08](tasks/T-08.md) `sign` connector: cosign signature and SLSA provenance | release-cli | P2 | todo | | |
+| [T-08](tasks/T-08.md) `sign` connector: cosign signature and SLSA provenance | release-cli | P2 | in progress | | |
 
 ### Phase 4: first consumer
 | Task | Repo | Depends on | Status | PR | Note |
