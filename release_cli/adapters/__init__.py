@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from release_cli.adapters.base import Adapter, AdapterError
+from release_cli.adapters.go import GoAdapter
 from release_cli.adapters.gradle import GradleAdapter
 from release_cli.adapters.maven import MavenAdapter
 from release_cli.adapters.sbt import SbtAdapter
@@ -10,6 +11,7 @@ _ADAPTERS: dict[Tool, Adapter] = {
     "maven": MavenAdapter(),
     "gradle": GradleAdapter(),
     "sbt": SbtAdapter(),
+    "go": GoAdapter(),
 }
 
 

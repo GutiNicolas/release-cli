@@ -14,12 +14,12 @@ GRADLE_MARKERS = (
     "build.gradle.kts",
 )
 SBT_MARKERS = ("build.sbt",)
+GO_MARKERS = ("go.mod",)
 SBT_DIR_MARKERS = (Path("project") / "build.properties",)
 
 OTHER_HINTS = (
     "package.json",
     "Cargo.toml",
-    "go.mod",
     "pyproject.toml",
 )
 
@@ -36,6 +36,8 @@ def detect(cwd: Path) -> list[Tool]:
         found.append("gradle")
     if _has_any(cwd, SBT_MARKERS) or any((cwd / rel).is_file() for rel in SBT_DIR_MARKERS):
         found.append("sbt")
+    if _has_any(cwd, GO_MARKERS):
+        found.append("go")
     return found
 
 
@@ -49,5 +51,5 @@ def describe_unsupported(cwd: Path) -> str:
     extra = extras(cwd)
     known = ", ".join(TOOLS)
     if extra:
-        return f"no maven/gradle/sbt project found (saw {', '.join(extra)}). supported: {known}"
-    return f"no maven/gradle/sbt project found. supported: {known}"
+        return f"no maven/gradle/sbt/go project found (saw {', '.join(extra)}). supported: {known}"
+    return f"no maven/gradle/sbt/go project found. supported: {known}"

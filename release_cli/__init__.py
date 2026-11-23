@@ -1,1 +1,1 @@
-"""Release candidates and final versions for Maven, Gradle, and sbt projects."""
+"""Release candidates and final versions for Maven, Gradle, sbt, and Go projects."""

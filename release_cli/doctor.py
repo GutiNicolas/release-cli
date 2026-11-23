@@ -193,9 +193,17 @@ def check_project(cwd: Path, global_cfg: dict[str, Any] | None) -> list[Check]:
         out.append(_ok("project version", f"{version} in {cfg.version_file}"))
     except (AdapterError, PlanError) as exc:
         out.append(_fail("project version", str(exc), f"check version_file ({cfg.version_file}) in the project config"))
+    if cfg.tool == "go":
+        out.append(_check_go())
     out.extend(_check_overrides(cfg.connectors, global_cfg))
     out.extend(_check_git(cwd))
     return out
+
+
+def _check_go() -> Check:
+    if shutil.which("go") is None:
+        return _warn("tool go", "go not found; `go test` hooks and Go builds need it", "install Go (https://go.dev/dl)")
+    return _ok("tool go", "found")
 
 
 def _check_overrides(project: dict[str, Any], global_cfg: dict[str, Any] | None) -> list[Check]:

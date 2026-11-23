@@ -53,11 +53,12 @@ release --dry-run -rc
 release -rc
 ```
 
-`--init` detects the build tool from files in the current directory (it does not run Maven, Gradle, or sbt):
+`--init` detects the build tool from files in the current directory (it does not run Maven, Gradle, sbt, or Go):
 
 - Maven: `pom.xml`
 - Gradle: `settings.gradle`, `settings.gradle.kts`, `build.gradle`, `build.gradle.kts`
 - sbt: `build.sbt` or `project/build.properties`
+- Go: `go.mod` (see [Go applications](#go-applications))
 
 If more than one is present, you choose. Init writes a local **`.release`** file and offers to add it to `.gitignore`. To share defaults with collaborators, opt in to a committed `release.toml`; a local `.release` still overrides it.
 
@@ -66,6 +67,14 @@ Re-run detection with `release --init --force`. `--init` never creates a release
 ### Gradle version location
 
 Put the project version in `gradle.properties` (`version=…`) or as a top-level `version = "…"` / `version.set("…")` in the root `build.gradle` / `build.gradle.kts`. Another file works too if you set `version_file` in `.release`.
+
+### Go applications
+
+A Go project keeps its version in a plain `VERSION` file at the repo root (`version_file` in `.release` can point elsewhere): one line, `X.Y.Z`, `X.Y.Z-rcN`, with or without `-SNAPSHOT`, and nothing else. Anything else in the file is refused, and the message shows the line that was read.
+
+`release --init` in a folder with `go.mod` writes `tool = "go"`, takes the artifact from the last element of the module path (`github.com/acme/localci` is `localci`; a trailing `/v2` is skipped), sets `tag_format = ["v{version}"]` and, after asking, creates `VERSION` with `0.0.0-SNAPSHOT` when it is missing, so the first `release -rc` is `v0.1.0-rc0`. It also offers `go test ./...` as a `before` hook. Commit `VERSION` before the first release.
+
+`-rc`, `-fv`, `--dry-run` and `hotfix` work as for the other tools and create only `v` tags (`v0.1.0-rc0`, `v0.1.0`), the form `go install ...@v0.1.0` and the Go module proxy see. The release does not build anything.
 
 ### Maven multi-module
 
