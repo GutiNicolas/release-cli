@@ -20,6 +20,7 @@ from urllib.parse import urlsplit
 
 from release_cli import secrets
 from release_cli.github_release import NotesError, release_notes
+from release_cli.tagformat import scheme_of, tag_of
 
 NOTIFY_ON = ("final", "every-deploy")
 DEFAULT_SECRET = "slack-webhook"
@@ -174,7 +175,7 @@ def run(req: dict[str, Any]) -> dict[str, Any]:
     if not _webhook_ok(url):
         return _fail(f"secret {secret_name!r} is not an https webhook URL; fix it with `release secret set {secret_name}`")
     try:
-        notes: str | None = release_notes(Path(req["repo_root"]), req["release_version"]) if req.get("repo_root") else None
+        notes: str | None = release_notes(Path(req["repo_root"]), tag_of(req), scheme_of(req)) if req.get("repo_root") else None
     except (NotesError, OSError):
         notes = None  # the message is still useful without the notes
     problem = post(url, build_payload(req, deploy, notes))

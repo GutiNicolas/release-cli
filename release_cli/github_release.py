@@ -17,7 +17,8 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-from release_cli.versioning import PlanError, ProjectVersion, parse
+from release_cli.tagformat import TagScheme, scheme_of, tag_of
+from release_cli.versioning import ProjectVersion, parse
 
 TOOL_COMMIT_PREFIX = "[manual-release]"
 GITHUB_REMOTE = re.compile(r"^(?:https?://(?:[^@/]+@)?github\.com/|ssh://git@github\.com(?::\d+)?/|git@github\.com:)[^/\s]+/[^/\s]+?(?:\.git)?/?$")
@@ -33,31 +34,33 @@ def _key(v: ProjectVersion) -> tuple[int, int, int, float]:
     return (v.major, v.minor, v.patch, float("inf") if v.rc is None else v.rc)
 
 
-def _plain(tag: str) -> ProjectVersion | None:
-    try:
-        parsed = parse(tag)
-    except PlanError:
+def _plain(tag: str, scheme: TagScheme | None = None) -> ProjectVersion | None:
+    """The version of a primary-form tag (history walks one tag per release), None for anything else or a SNAPSHOT."""
+    version = (scheme or TagScheme()).primary_version_of(tag)
+    if version is None:
         return None
+    parsed = parse(version)
     return None if parsed.snapshot else parsed
 
 
-def previous_tag(version: str, tags: list[str]) -> str | None:
-    """Greatest plain version tag strictly lower than `version`. Finals only compare against finals."""
-    current = parse(version)
+def previous_tag(tag: str, tags: list[str], scheme: TagScheme | None = None) -> str | None:
+    """Greatest primary tag strictly lower than `tag`. Finals only compare against finals."""
+    scheme = scheme or TagScheme()
+    current = parse(scheme.version_of(tag) or tag)
     best: tuple[tuple[int, int, int, float], str] | None = None
-    for tag in tags:
-        candidate = _plain(tag)
+    for name in tags:
+        candidate = _plain(name, scheme)
         if candidate is None or (current.rc is None and candidate.rc is not None):
             continue
         key = _key(candidate)
         if key < _key(current) and (best is None or key > best[0]):
-            best = (key, tag)
+            best = (key, name)
     return best[1] if best else None
 
 
-def latest_tag(tags: list[str]) -> str | None:
-    """Greatest plain version tag (RC or final), or None."""
-    found = [(_key(v), tag) for tag in tags if (v := _plain(tag)) is not None]
+def latest_tag(tags: list[str], scheme: TagScheme | None = None) -> str | None:
+    """Greatest primary version tag (RC or final), or None."""
+    found = [(_key(v), tag) for tag in tags if (v := _plain(tag, scheme)) is not None]
     return max(found)[1] if found else None
 
 
@@ -71,10 +74,10 @@ def _git(root: Path, *args: str) -> str:
     return proc.stdout
 
 
-def commit_range(repo_root: Path, version: str, *, end: str | None = None) -> tuple[str | None, str]:
-    """(previous tag, git range) of the commits `version` ships: since the previous tag (a final: the previous final)."""
-    prev = previous_tag(version, _git(repo_root, "tag", "--list").split())
-    end = end or version
+def commit_range(repo_root: Path, tag: str, *, end: str | None = None, scheme: TagScheme | None = None) -> tuple[str | None, str]:
+    """(previous tag, git range) of the commits `tag` ships: since the previous tag (a final: the previous final)."""
+    prev = previous_tag(tag, _git(repo_root, "tag", "--list").split(), scheme)
+    end = end or tag
     return prev, f"{prev}..{end}" if prev else end
 
 
@@ -82,8 +85,8 @@ def git_log(repo_root: Path, rng: str, pretty: str, *, merges: bool = False) -> 
     return _git(repo_root, "log", *([] if merges else ["--no-merges"]), f"--pretty=format:{pretty}", rng, "--")
 
 
-def release_notes(repo_root: Path, version: str) -> str:
-    prev, rng = commit_range(repo_root, version)
+def release_notes(repo_root: Path, tag: str, scheme: TagScheme | None = None) -> str:
+    prev, rng = commit_range(repo_root, tag, scheme=scheme)
     log = git_log(repo_root, rng, "%h%x09%s")
     bullets = []
     for line in log.splitlines():
@@ -105,7 +108,7 @@ def questions(req: dict[str, Any]) -> dict[str, Any]:
     return {
         "protocol": 1,
         "questions": [
-            {"id": "publish", "type": "bool", "prompt": f"Create the GitHub Release for {req['release_version']}?", "default": True},
+            {"id": "publish", "type": "bool", "prompt": f"Create the GitHub Release for {tag_of(req)}?", "default": True},
         ],
     }
 
@@ -121,8 +124,9 @@ def run(req: dict[str, Any]) -> dict[str, Any]:
     if gh is None:
         return _fail(GH_MISSING, published=False)
     root = Path(req["repo_root"])
-    tag = req["release_version"]
-    prerelease = _plain(tag) is not None and parse(tag).rc is not None
+    tag = tag_of(req)
+    scheme = scheme_of(req)
+    prerelease = (version := scheme.version_of(tag)) is not None and parse(version).rc is not None
 
     def call(*args: str) -> subprocess.CompletedProcess[str]:
         return subprocess.run([gh, *args], cwd=root, capture_output=True, text=True, check=False)
@@ -131,7 +135,7 @@ def run(req: dict[str, Any]) -> dict[str, Any]:
         existing = call("release", "view", tag, "--json", "url", "--jq", ".url")
         if existing.returncode == 0:
             return {"protocol": 1, "ok": True, "result": {"published": True, "existed": True, "url": existing.stdout.strip()}}
-        notes = release_notes(root, tag)
+        notes = release_notes(root, tag, scheme)
         with tempfile.TemporaryDirectory(prefix="release-notes-") as tmp:
             notes_file = Path(tmp) / "notes.md"
             notes_file.write_text(notes, encoding="utf-8")

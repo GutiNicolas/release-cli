@@ -9,6 +9,8 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Callable, Literal
 
+from release_cli import tagformat
+
 LOCAL_NAME = ".release"
 TEAM_NAME = "release.toml"
 When = Literal["before", "after"]
@@ -39,6 +41,12 @@ class Config:
     hooks_explicit: bool = True
     # [connectors]: order/enabled/disabled lists plus one table of values per connector.
     connectors: dict[str, Any] = field(default_factory=dict)
+    # Templates of the tags a release creates; None = not set (the default of every tool today).
+    tag_format: tuple[str, ...] | None = None
+
+    @property
+    def tags(self) -> tagformat.TagScheme:
+        return tagformat.TagScheme(self.tag_format or tagformat.DEFAULT, self.artifact)
 
 
 def _key(name: str) -> str:
@@ -97,6 +105,8 @@ def _hook_dict(hook: Hook) -> dict[str, Any]:
 
 def to_dict(cfg: Config) -> dict[str, Any]:
     data: dict[str, Any] = {"tool": cfg.tool, "artifact": cfg.artifact, "version_file": cfg.version_file}
+    if cfg.tag_format:
+        data["tag_format"] = list(cfg.tag_format)
     data["hooks"] = [_hook_dict(h) for h in cfg.hooks]
     if cfg.connectors:
         data["connectors"] = cfg.connectors
@@ -140,6 +150,15 @@ def _parse_connectors(raw: Any) -> dict[str, Any]:
     return raw
 
 
+def _parse_tag_format(raw: Any) -> tuple[str, ...] | None:
+    if raw is None:
+        return None
+    reason = tagformat.problem(raw)
+    if reason:
+        raise ConfigError(reason)
+    return tuple(raw)
+
+
 def parse_data(data: dict[str, Any]) -> Config:
     tool = data.get("tool")
     if tool not in TOOLS:
@@ -157,6 +176,7 @@ def parse_data(data: dict[str, Any]) -> Config:
         hooks=_parse_hooks(data.get("hooks", [])),
         hooks_explicit="hooks" in data,
         connectors=_parse_connectors(data.get("connectors", {})),
+        tag_format=_parse_tag_format(data.get("tag_format")),
     )
 
 
@@ -195,6 +215,7 @@ def merge(base: Config, overlay: Config) -> Config:
         hooks=hooks,
         hooks_explicit=True,
         connectors=merge_connectors(base.connectors, overlay.connectors),
+        tag_format=overlay.tag_format or base.tag_format,
     )
 
 

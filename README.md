@@ -94,7 +94,19 @@ release -fv             # 2.74.0; next `release -rc` starts 2.75.0-rc0
 release -rc --patch     # from 2.74.0-SNAPSHOT → 2.74.1-rc0
 ```
 
-Tags created: `VERSION` and `{artifact}-{VERSION}`.
+### Tag names
+
+By default a release creates two tags: `VERSION` and `{artifact}-{VERSION}`. `tag_format` in `.release` or `release.toml` changes that: a list of templates with `{version}` (required, once) and `{artifact}` (optional).
+
+```toml
+tag_format = ["v{version}"]     # only v2.75.0-rc1, v2.75.0 (what Go modules need)
+```
+
+- Every template becomes a tag, created and pushed together in one atomic push. Unset keeps today's two tags.
+- The **first** template is the primary tag: `release notes`, `release history`, `release status` and the saved connector runs use it, and so does the tag connectors receive (`tag` in the request). `release_version` stays the bare version, without any prefix.
+- Commands that take a tag (`connectors run|status`, `undo`, `hotfix`, `notes`) accept any form in the list. A `v` is understood only when a template has it: with `["v{version}"]`, `2.75.0-rc1` is not a tag.
+- Invalid lists (empty, no `{version}`, `{version}` twice, repeated templates, unknown `{placeholders}`, characters git rejects) are refused when the config loads, with the reason.
+- Changing `tag_format` in a repo that already has releases: history and notes follow the primary tag only, so the older tags no longer show up there.
 
 ## Hooks
 
@@ -236,7 +248,7 @@ Then, once per release, "Send the Slack notice?" (default yes). A missing secret
 
 A connector is a `release.connectors` entry point pointing at a zero-arg callable. release-cli runs it in a subprocess with the action (`questions` or `run`) as `argv[1]`, one JSON request on stdin, and expects one JSON object on stdout. Logs go to stderr and are shown live.
 
-- Request: `protocol`, `action`, `connector`, `repo`, `remote_url`, `repo_root`, `artifact`, `release_version`, `tags`, `sha`, `mode` (`rc`/`fv`), `dry_run`, `prior` (`{name: {status, result, error, job_id}}`), `config`, `resume_job_id`; `run` adds `answers`.
+- Request: `protocol`, `action`, `connector`, `repo`, `remote_url`, `repo_root`, `artifact`, `release_version`, `tag` (the primary tag), `tags`, `tag_format`, `sha`, `mode` (`rc`/`fv`), `dry_run`, `prior` (`{name: {status, result, error, job_id}}`), `config`, `resume_job_id`; `run` adds `answers`.
 - `questions` → `{"protocol": 1, "questions": [...], "applies": true, "timeout_seconds": 1860}`. Not for this project: `"applies": false, "reason": "..."` (skipped, exit 0). A prerequisite that **already finished** unsuccessfully (e.g. a resumed build that is not `SUCCESS`): `"applies": false, "blocked": true, "reason": "..."` (recorded `failed` with that reason, exit 1). The CLI asks every connector before any `run`, so `prior` in `questions` does not include connectors that will run in this same invocation. If that result is simply not there yet, return the questions; `run` receives the real `prior` and is where a missing or failed prerequisite is refused. Question types `bool`, `choice`, `text`, `int`, `multi`, with `default`, `default_when`, `when`, `persist`, `pattern` (text), `min`/`max` (int). 30 s timeout.
 - `multi` asks "pick from this list": `{"id": "issues", "type": "multi", "prompt": "...", "options": [{"value": "ABC-1", "label": "ABC-1 Fix login"}], "default": ["ABC-1"], "other": {"pattern": "[A-Z][A-Z0-9_]+-[0-9]+"}}`. `options` may be plain strings; `default` is a subset of the values (none if omitted); `other` (optional) lets the user add extra values matching `pattern`; `persist` must stay `none`. The answer in `run` is a list of strings: the picked options in option order, then the extras. In the terminal the user sees a numbered `[x]`/`[ ]` list: Enter accepts, `2 5` toggles, `+KEY` adds, `-KEY` removes. `--defaults` takes `default`.
 - `run` → `{"protocol": 1, "ok": true, "result": {...}}`, optionally `status` (`interrupted`), `error`, `job_id`.
@@ -249,7 +261,7 @@ The built-in [`release_cli/cursor_review.py`](release_cli/cursor_review.py) is a
 Patch a version that is already released:
 
 ```sh
-release hotfix 2.74.0     # branch hotfix/2.74.1 from tag 2.74.0 (also accepts <artifact>-2.74.0)
+release hotfix 2.74.0     # branch hotfix/2.74.1 from tag 2.74.0 (any form of tag_format: also <artifact>-2.74.0 by default)
 # fix, commit
 release -rc               # 2.74.1-rc0
 release -rc               # 2.74.1-rc1
@@ -269,7 +281,7 @@ release status              # version, open RC, last tag, branch vs origin, the 
 release status --json       # the same as one JSON object (--no-fetch skips the fetch)
 release history             # releases of this repo, newest first, with what each connector did
 release notes [tag]         # markdown notes since the previous tag (default: the latest tag)
-release undo 2.75.0-rc1     # deletes that RC's two tags on origin and locally, after asking (--force skips)
+release undo 2.75.0-rc1     # deletes that RC's tags on origin and locally, after asking (--force skips)
 ```
 
 `release history` lists the version tags of the repo (newest first, `--limit N`, default 10; `--finals` hides release candidates; `--json` prints one object) with the tag date and commit. Under each release it shows the saved connector runs of this machine: status, `updated_at`, the error, and for a connector that is not `ok` the command that resumes it. A tag with no saved runs shows `no connector runs on this machine`. It only reads.

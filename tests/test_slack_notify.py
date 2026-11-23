@@ -87,7 +87,7 @@ def _text(payload: dict) -> str:
 
 
 def test_final_message_carries_deploy_release_link_and_delivered_tickets(hook: Hook, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(sn, "release_notes", lambda root, version: "## Changes since 1.1.0\n\n- add <login> (abc1234)\n")
+    monkeypatch.setattr(sn, "release_notes", lambda root, tag, scheme=None: "## Changes since 1.1.0\n\n- add <login> (abc1234)\n")
     out = parse_run(sn.run({**_req(), "repo_root": "/repo"}))
     assert out.status == "ok" and out.result == {"sent": True}
     (payload,) = hook.posts
@@ -103,7 +103,7 @@ def test_final_message_carries_deploy_release_link_and_delivered_tickets(hook: H
 
 
 def test_long_notes_and_ticket_lists_stay_inside_slack_limits(hook: Hook, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(sn, "release_notes", lambda root, version: "\n".join(f"- change number {i} " + "x" * 40 for i in range(200)))
+    monkeypatch.setattr(sn, "release_notes", lambda root, tag, scheme=None: "\n".join(f"- change number {i} " + "x" * 40 for i in range(200)))
     many = {"status": "ok", "result": {**JIRA_OK["result"], "issues": [{"key": f"ABC-{i}", "summary": "s", "status": "delivered"} for i in range(60)]}}
     assert sn.run({**_req(prior={"jira": many}), "repo_root": "/repo"})["ok"]
     blocks = hook.posts[0]["blocks"]
