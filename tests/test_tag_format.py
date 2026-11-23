@@ -107,6 +107,10 @@ TOOL = 'tool = "maven"\nartifact = "example-app"\nversion_file = "pom.xml"\n'
         ('["{artifact}-{artifact}-{version}"]', "more than once"),
         ('["v {version}"]', "not a valid tag name"),
         ("[1]", "non-empty strings"),
+        ('["{version}.lock"]', "git cannot tag"),
+        ('["/{version}"]', "git cannot tag"),
+        ('["{version}/"]', "git cannot tag"),
+        ('["-{version}"]', "git cannot tag"),
     ],
 )
 def test_invalid_templates_are_refused_at_load_with_the_reason(value: str, reason: str) -> None:

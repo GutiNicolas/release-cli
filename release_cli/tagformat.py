@@ -2,12 +2,13 @@
 
 The first template is the primary tag (notes, history, `connectors run`, saved run state); every
 template is created and pushed together, and any of them is accepted where a tag is typed.
-Pure: no disk, no git.
+Pure except `problem()`, which asks `git check-ref-format` whether a sample tag is valid (skipped when git is missing).
 """
 
 from __future__ import annotations
 
 import re
+import subprocess
 from dataclasses import dataclass
 
 from release_cli.versioning import PlanError, parse
@@ -16,6 +17,17 @@ DEFAULT: tuple[str, ...] = ("{version}", "{artifact}-{version}")
 _PLACEHOLDER = re.compile(r"\{([^{}]*)\}")
 # Literal text a tag may carry around the placeholders: enough for `v`, `app-`, `release/`; nothing git rejects.
 _LITERAL = re.compile(r"^[A-Za-z0-9._/+-]*$")
+
+
+def _git_accepts(tag: str) -> bool:
+    """False when git refuses `refs/tags/<tag>` or `git tag` would read the tag as an option."""
+    if tag.startswith("-"):
+        return False
+    try:
+        done = subprocess.run(["git", "check-ref-format", f"refs/tags/{tag}"], capture_output=True, timeout=10, check=False)
+    except (OSError, subprocess.SubprocessError):
+        return True  # no usable git here: the later `git tag` still refuses it
+    return done.returncode == 0
 
 
 def problem(formats: object) -> str | None:
@@ -40,6 +52,9 @@ def problem(formats: object) -> str | None:
         literal = _PLACEHOLDER.sub("", template)
         if "{" in literal or "}" in literal or not _LITERAL.match(literal) or ".." in literal or "//" in literal:
             return f"tag_format entry {template!r} is not a valid tag name"
+        sample = template.replace("{artifact}", "example-app").replace("{version}", "1.2.0-rc0")
+        if not _git_accepts(sample):
+            return f"tag_format entry {template!r} renders {sample!r}, which git cannot tag"
     return None
 
 
