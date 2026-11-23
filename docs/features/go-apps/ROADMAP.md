@@ -138,4 +138,5 @@ Results: `github-release` adds `"assets": [names]`; `npm-publish` `{"name", "ver
 - 2026-11-22: user decisions: native build, `VERSION` file (T-02 reworked), naming localci here is fine. Provenance at launch still open.
 - 2026-11-22: provenance before launch, in the local CI: phase 3 is now key-signed provenance (T-08 `sign`); the GitHub workflow work moved to phase 5 (T-10).
 - 2026-11-22: approved by the user; plan put on main through a docs-only PR.
+- 2026-11-22: phase 1 merged to main (#20): T-01, T-02 and one review fix (`fix(T-01)`: `tag_format` refuses templates git cannot tag). Phase 2 is ready to dispatch.
 - 2026-11-22: phase 1 merged to main (#20): T-01, T-02 and one review fix (fix(T-01): `tag_format` refuses templates git cannot tag). Phase 2 is ready to dispatch.
