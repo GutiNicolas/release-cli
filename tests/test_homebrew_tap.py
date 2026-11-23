@@ -73,7 +73,7 @@ def _req(tmp_path: Path, manifest: dict[str, Any], **over: Any) -> dict[str, Any
         "mode": "final",
         "dry_run": False,
         "out_dir": None,
-        "prior": {"go-build": {"status": "ok", "result": manifest}},
+        "prior": {"go-build": {"status": "ok", "result": manifest}, "github-release": {"status": "ok", "result": {"published": True}}},
         "config": {"tap": "acme/homebrew-tap", "token_secret": "homebrew-tap-token"},
     }
     return {**req, **over}
@@ -116,6 +116,29 @@ def test_dry_run_renders_the_formula_with_every_url_and_checksum(tmp_path: Path,
     if ruby:
         check = subprocess.run([ruby, "-c", str(out / "hello.rb")], capture_output=True, text=True)
         assert check.returncode == 0, check.stdout + check.stderr
+
+
+@pytest.mark.parametrize(
+    "release",
+    [None, {"status": "ok", "result": {"published": False}}, {"status": "failed", "error": "boom", "result": {"published": False}}],
+    ids=["not-in-chain", "declined", "failed"],
+)
+def test_no_formula_is_committed_when_the_release_assets_are_not_published(tmp_path: Path, fake_gh: Path, release: dict[str, Any] | None) -> None:
+    manifest = _manifest(tmp_path / "dist")
+    prior = {"go-build": {"status": "ok", "result": manifest}, **({"github-release": release} if release else {})}
+    outcome = parse_run(homebrew_tap.run(_req(tmp_path, manifest, prior=prior)))
+    assert outcome.status == "ok", outcome.error  # a skip, not a failure
+    assert outcome.result["formula"] is None and "github-release" in outcome.result["skipped_reason"]
+    assert _calls(fake_gh) == []
+
+
+def test_a_dry_run_renders_the_formula_without_a_published_release(tmp_path: Path, fake_gh: Path) -> None:
+    out = tmp_path / "out"
+    manifest = _manifest(out)
+    prior = {"go-build": {"status": "ok", "result": manifest}}
+    outcome = parse_run(homebrew_tap.run(_req(tmp_path, manifest, prior=prior, dry_run=True, out_dir=str(out))))
+    assert outcome.status == "ok", outcome.error
+    assert (out / "hello.rb").is_file()
 
 
 def test_a_release_candidate_is_skipped_with_a_reason(tmp_path: Path, fake_gh: Path) -> None:

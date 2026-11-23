@@ -1,7 +1,8 @@
 """Built-in connector `homebrew-tap`: a Homebrew formula for a final release, committed to a tap repository.
 
 The formula is rendered from the `go-build` manifest (`prior["go-build"]`): one url and sha256 per os/arch, `bin.install`
-and a `test do` that runs `<binary> version`. Release candidates are skipped (Homebrew carries finals only). A real run
+and a `test do` that runs `<binary> version`. Release candidates are skipped (Homebrew carries finals only), and so is a real run whose `github-release` did not publish
+the archives. A real run
 commits `Formula/<binary>.rb` to the tap with `gh api` and the token stored under `token_secret`; a dry run only renders
 the formula into `out_dir`.
 
@@ -168,6 +169,11 @@ def run(req: dict[str, Any]) -> dict[str, Any]:
     try:
         spec = _settings(req)
         manifest = _manifest(req)
+        if not req.get("dry_run"):
+            release = (req.get("prior") or {}).get("github-release")
+            done = isinstance(release, dict) and release.get("status") == "ok" and isinstance(release.get("result"), dict) and release["result"].get("published") is True
+            if not done:
+                return _skip("github-release did not publish the release archives, so the formula would point at urls that do not exist; nothing committed")
         binary = _binary_of(manifest)
         slug = github_slug(req.get("remote_url"))
         base = download_base(req)
