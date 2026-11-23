@@ -24,6 +24,9 @@ args = sys.argv[1:]
 log = os.environ["FAKE_NPM_LOG"]
 rc = args[args.index("--userconfig") + 1] if "--userconfig" in args else None
 entry = {{"args": args, "npmrc": open(rc).read() if rc else None}}
+if args[0] == "pack":
+    entry["files"] = sorted(os.path.relpath(os.path.join(d, f), args[1]) for d, _, fs in os.walk(args[1]) for f in fs)
+    entry["pkg"] = json.load(open(os.path.join(args[1], "package.json")))
 open(log, "a").write(json.dumps(entry) + "\\n")
 if args[0] == "pack":
     src, dest = args[1], args[args.index("--pack-destination") + 1]
@@ -47,10 +50,21 @@ elif args[0] == "publish" and os.environ.get("FAKE_NPM_PUBLISH_FAILS"):
 """
 
 
+def _git(repo: Path, *args: str) -> str:
+    return subprocess.run(["git", *args], cwd=repo, check=True, capture_output=True, text=True).stdout.strip()
+
+
 @pytest.fixture
-def repo(tmp_path: Path) -> Path:
+def repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    cfg = tmp_path / "gitconfig"
+    cfg.write_text("[user]\n\tname = T\n\temail = t@example.com\n[init]\n\tdefaultBranch = main\n[commit]\n\tgpgsign = false\n")
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(cfg))
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
     root = tmp_path / "app"
     shutil.copytree(FIXTURE, root)
+    _git(root, "init")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-m", "release")
     return root
 
 
@@ -84,6 +98,7 @@ def _req(repo: Path, out: Path, version: str = "0.1.0-rc0", **over: Any) -> dict
         "repo_root": str(repo),
         "artifact": "hello",
         "release_version": version,
+        "sha": _git(repo, "rev-parse", "HEAD"),
         "mode": "rc" if "-" in version else "final",
         "dry_run": False,
         "out_dir": str(out),
@@ -98,6 +113,20 @@ def _tgz_version(path: Path) -> str:
         member = tar.extractfile("package/package.json")
         assert member is not None
         return json.load(member)["version"]
+
+
+def test_packs_the_released_commit_not_the_working_tree(repo: Path, tmp_path: Path, fake_npm: Path) -> None:
+    pkg = repo / PKG_DIR
+    committed = json.loads((pkg / "package.json").read_text())
+    (pkg / ".env").write_text("SECRET=1\n")  # untracked
+    (pkg / "build").mkdir()
+    (pkg / "build" / "stray.js").write_text("x")  # untracked folder
+    (pkg / "package.json").write_text(json.dumps({**committed, "description": "uncommitted edit"}))
+    outcome = parse_run(npm_publish.run(_req(repo, tmp_path / "out")))
+    assert outcome.status == "ok", outcome.error
+    pack = next(c for c in _calls(fake_npm) if c["args"][0] == "pack")
+    assert pack["files"] == ["package.json"]
+    assert pack["pkg"].get("description") == committed.get("description")
 
 
 @pytest.mark.skipif(shutil.which("npm") is None, reason="needs npm")

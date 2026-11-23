@@ -1,6 +1,6 @@
 """Built-in connector `npm-publish`: publish the app's npm package with the same version as the binary.
 
-The package folder (`package_dir`) is copied to a temp dir, its `version` is set there (the tracked `package.json`
+The package folder (`package_dir`) is extracted from the release commit (`git archive`) into a temp dir, its `version` is set there (the tracked `package.json`
 is never edited), `npm pack` writes the tarball into the `go-build` output folder and `npm publish <tarball>` uploads
 it. RCs go under the dist-tag `rc_dist_tag` (default `next`), finals under `latest`. Dry run: `npm publish --dry-run`.
 A version that is already on the registry is a success with `published: false`, so a resumed run does not fail.
@@ -14,11 +14,13 @@ logged; without that secret npm uses the user's own `npm login`.
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import re
 import shutil
 import subprocess
 import sys
+import tarfile
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -32,7 +34,6 @@ ACCESS = ("public", "restricted")
 NPM_MISSING = "`npm` is not on PATH; install Node.js (https://nodejs.org) and make sure `npm --version` works in this shell"
 ERROR_TAIL = 15
 TIMEOUT = 600
-NO_COPY = ("node_modules", ".git")
 
 
 class PublishError(RuntimeError):
@@ -105,12 +106,22 @@ def _token(settings: dict[str, Any]) -> str | None:
     return value
 
 
-def _prepare(root: Path, settings: dict[str, Any], version: str, tmp: Path) -> Path:
+def _prepare(root: Path, settings: dict[str, Any], version: str, tmp: Path, sha: str) -> Path:
+    """Extract `package_dir` as committed at `sha`: untracked and uncommitted files never reach `npm pack`."""
     src = (root / settings["package_dir"]).resolve()
-    if root.resolve() not in src.parents or not (src / "package.json").is_file():
+    if root.resolve() != src and root.resolve() not in src.parents:
         raise PublishError(f"no package.json in {settings['package_dir']!r} (package_dir is relative to the repo root)")
-    copy = tmp / "package"
-    shutil.copytree(src, copy, ignore=shutil.ignore_patterns(*NO_COPY))
+    rel = src.relative_to(root.resolve()).as_posix()
+    archive = subprocess.run(["git", "archive", "--format=tar", sha, "--", rel], cwd=root, capture_output=True, check=False)
+    if archive.returncode != 0:
+        raise PublishError(f"could not read {settings['package_dir']!r} from commit {sha}: {_tail(archive.stderr.decode(errors='replace'), None)}")
+    extracted = tmp / "tree"
+    extracted.mkdir()
+    with tarfile.open(fileobj=io.BytesIO(archive.stdout)) as tar:
+        tar.extractall(extracted, filter="data")
+    copy = extracted / rel
+    if not (copy / "package.json").is_file():
+        raise PublishError(f"no package.json in {settings['package_dir']!r} at commit {sha[:12]} (is it committed? package_dir is relative to the repo root)")
     pkg_file = copy / "package.json"
     try:
         pkg = json.loads(pkg_file.read_text(encoding="utf-8"))
@@ -152,7 +163,7 @@ def _publish(req: dict[str, Any], settings: dict[str, Any], dest: Path) -> dict[
     token = _token(settings)
     with tempfile.TemporaryDirectory(prefix="npm-publish-") as tmpdir:
         tmp = Path(tmpdir)
-        pkg = _prepare(Path(req["repo_root"]), settings, version, tmp)
+        pkg = _prepare(Path(req["repo_root"]), settings, version, tmp, req.get("sha") or "HEAD")
         name = json.loads((pkg / "package.json").read_text(encoding="utf-8"))["name"]
         userconfig: Path | None = None
         if token:
