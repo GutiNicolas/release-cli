@@ -26,6 +26,7 @@ from urllib.parse import quote, urlparse
 
 from release_cli import github_release, secrets
 from release_cli.connectors import load_release_toml, resume_hint
+from release_cli.tagformat import scheme_of, tag_of
 
 TOKEN_SECRET = "jira-token"
 KEY_RE = re.compile(r"\b[A-Z][A-Z0-9_]+-\d+\b")
@@ -125,9 +126,9 @@ def jira_version_name(req: dict[str, Any]) -> str:
 def commit_keys(req: dict[str, Any]) -> list[str]:
     """Ticket keys in the commits this version ships (same range as `release notes`), sorted."""
     root = Path(req["repo_root"])
-    version = req["release_version"]
-    tagged = subprocess.run(["git", "rev-parse", "-q", "--verify", f"refs/tags/{version}"], cwd=root, capture_output=True, check=False)
-    _prev, rng = github_release.commit_range(root, version, end=None if tagged.returncode == 0 else "HEAD")
+    tag = tag_of(req)
+    tagged = subprocess.run(["git", "rev-parse", "-q", "--verify", f"refs/tags/{tag}"], cwd=root, capture_output=True, check=False)
+    _prev, rng = github_release.commit_range(root, tag, end=None if tagged.returncode == 0 else "HEAD", scheme=scheme_of(req))
     keys = set(KEY_RE.findall(github_release.git_log(root, rng, "%B", merges=True)))
     return sorted(keys, key=lambda k: (k.rsplit("-", 1)[0], int(k.rsplit("-", 1)[1])))
 
@@ -295,7 +296,7 @@ def _deliver(jira: Jira, key: str, version: str, transition: str, target: list[s
 
 def run_final(jira: Jira, req: dict[str, Any], keys: list[str], project: str, transition: str) -> dict[str, Any]:
     name = jira_version_name(req)
-    tag = req["release_version"]
+    tag = tag_of(req)
     try:
         version = _ensure_version(jira, project, name)
     except JiraError as exc:

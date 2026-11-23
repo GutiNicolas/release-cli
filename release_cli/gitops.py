@@ -140,9 +140,9 @@ def remote_branch_exists(name: str) -> bool:
     return bool(result.stdout.strip())
 
 
-def remote_tags_of(version: str) -> list[str]:
-    """Tags on origin named <version> or <version>-rcN."""
-    result = run(["git", "ls-remote", "--tags", "origin", f"refs/tags/{version}", f"refs/tags/{version}-rc*"], check=False)
+def remote_tags_matching(patterns: list[str]) -> list[str]:
+    """Tags on origin matching any of the glob `patterns` (tag names, no refs/tags/ prefix)."""
+    result = run(["git", "ls-remote", "--tags", "origin", *(f"refs/tags/{p}" for p in patterns)], check=False)
     if result.returncode != 0:
         raise GitError((result.stderr or "git ls-remote failed").strip())
     return sorted({line.split("refs/tags/")[1] for line in result.stdout.splitlines() if not line.endswith("^{}")})

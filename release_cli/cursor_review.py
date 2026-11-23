@@ -27,6 +27,7 @@ from typing import Any, Callable
 from urllib.parse import urlencode
 
 from release_cli.connectors import data_dir, load_release_toml
+from release_cli.tagformat import tag_of
 
 SURFACES = ("agents", "classic")
 
@@ -463,7 +464,7 @@ def run(req: dict[str, Any], *, now: Callable[[], float] = time.time, spawn: Cal
     job = schedule(
         {
             "repo": req["repo"],
-            "tag": req["release_version"],
+            "tag": tag_of(req),
             "target_epoch": target,
             "target_at": _iso(target),
             "prompt": build_prompt(req, result, succeeded, delay, answers.get("extra_prompt") or ""),
@@ -477,7 +478,7 @@ def run(req: dict[str, Any], *, now: Callable[[], float] = time.time, spawn: Cal
         },
         spawn=spawn,
     )
-    print(f"review scheduled for {job['target_at']} (pid {job['spawned_pid']}); see `release connectors status {req['release_version']}`", file=sys.stderr)
+    print(f"review scheduled for {job['target_at']} (pid {job['spawned_pid']}); see `release connectors status {tag_of(req)}`", file=sys.stderr)
     return {
         "protocol": 1,
         "ok": True,

@@ -27,6 +27,7 @@ from release_cli.config import (
     loads_toml,
     set_connector_value,
 )
+from release_cli.tagformat import TagScheme, tag_of
 
 PROTOCOL = 1
 QUESTIONS_TIMEOUT = 30.0
@@ -695,7 +696,9 @@ def repo_name(remote: str, root: Path) -> str:
     return base or root.name
 
 
-def build_context(root: Path, remote: str, artifact: str, release_version: str, sha: str) -> dict[str, Any]:
+def build_context(root: Path, remote: str, scheme: TagScheme, release_version: str, sha: str) -> dict[str, Any]:
+    artifact = scheme.artifact
+    tags = scheme.render(release_version)
     return {
         "protocol": PROTOCOL,
         "repo": repo_name(remote, root),
@@ -703,7 +706,9 @@ def build_context(root: Path, remote: str, artifact: str, release_version: str, 
         "repo_root": str(root),
         "artifact": artifact,
         "release_version": release_version,
-        "tags": [release_version, f"{artifact}-{release_version}"],
+        "tag": tags[0],
+        "tags": tags,
+        "tag_format": list(scheme.formats),
         "sha": sha,
         "mode": "rc" if "-rc" in release_version else "fv",
     }
@@ -735,7 +740,7 @@ def load_state(repo: str, tag: str) -> dict[str, Any] | None:
 
 
 def save_state(state: dict[str, Any]) -> Path:
-    path = state_path(state["repo"], state["release_version"])
+    path = state_path(state["repo"], tag_of(state))
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(".tmp")
     tmp.write_text(json.dumps(state, indent=2) + "\n", encoding="utf-8")
@@ -781,7 +786,7 @@ def run_chain(
     `prior` during questions is only what already finished (a resume). Connectors about to run in
     this invocation are not in it yet, so they must ask without that result and refuse at run time.
     """
-    tag = context["release_version"]
+    tag = tag_of(context)
     alert = alert or log  # failures and resume hints; the CLI keeps them visible under --quiet
     misordered = jira_after_deploy(conns) if context.get("mode") == "fv" else None
     if misordered:
