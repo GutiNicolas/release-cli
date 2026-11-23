@@ -80,7 +80,7 @@ Build flags are fixed: `-trimpath`, `GOOS`/`GOARCH` per target, `GOFLAGS=-mod=re
 <binary>_<version>_<os>_<arch>.tar.gz    # one per target: <binary>, plus archive_files
 checksums.txt                            # "<sha256>  <file>" per line, sorted by file name
 <npm-name>-<version>.tgz                 # npm pack, when npm-publish is enabled
-<binary>.rb                              # Homebrew formula (finals; rendered in dry-run too)
+<binary>.rb                              # Homebrew formula (finals): lives in the tap repo, not on the GitHub Release; also in the dry-run folder
 install.sh                               # installer: detects os/arch, downloads, verifies checksums.txt
 manifest.json
 checksums.txt.sig                        # phase 3: cosign signature bundle of checksums.txt
