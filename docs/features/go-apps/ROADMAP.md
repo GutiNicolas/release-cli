@@ -105,7 +105,7 @@ Results: `github-release` adds `"assets": [names]`; `npm-publish` `{"name", "ver
 | [T-02](tasks/T-02.md) `go` tool: detection and `VERSION` file | release-cli | T-01 | merged | [#21](https://github.com/GutiNicolas/release-cli/pull/21) | |
 
 ### Phase 2: build and publish connectors, dry-run that builds
-**Phase 2 release:** `release/go-apps-p2` (cut 2026-11-22), release PR [#23](https://github.com/GutiNicolas/release-cli/pull/23).
+**Phase 2 release:** `release/go-apps-p2` (cut 2026-11-22), release PR [#23](https://github.com/GutiNicolas/release-cli/pull/23). Last reviewed: 888348f (2026-11-23, 9 findings: 0 critical, 0 high, 4 medium, 5 low).
 | Task | Repo | Depends on | Status | PR | Note |
 |---|---|---|---|---|---|
 | [T-03](tasks/T-03.md) Dry-run runs connectors that declare it safe | release-cli | P1 | integrated | [#22](https://github.com/GutiNicolas/release-cli/pull/22) | |
