@@ -230,6 +230,8 @@ Settings: `release edit` then `global set cursor-review <key> <value>` for `dela
 
 Optional, built in: `release connector add github-release`. After the push it creates the GitHub Release of the tag with the [GitHub CLI](https://cli.github.com/) (`gh`, installed and logged in with `gh auth login`). Release candidates are marked as pre-releases. The notes are the commits since the previous tag (for a final, since the previous final), without the CLI's own `[manual-release]` commits; `release notes <tag>` prints the same text. It asks once per release (default yes), skips repositories whose `origin` is not on github.com, and on a resume reuses a release that already exists instead of creating a second one.
 
+When `go-build` ran before it in the chain (it must come first in the order), the release also gets the build's files: the archives, `checksums.txt`, the installer and the Homebrew formula, so people can download and verify them. The npm package is not uploaded. Each file is one `gh release upload --clobber`; on a resume the release is reused and only the files that are missing (or whose size differs) are uploaded again. Without `go-build` nothing changes. `release --dry-run` calls no `gh`: it prints the assets it would upload.
+
 ### go-build
 
 Optional, built in: `release connector add go-build`. For Go apps it cross-compiles the release with plain `go build` (no GoReleaser) after the push, so the binaries always come from the tagged commit. It builds in a temporary `git worktree`, so uncommitted changes never get in, and removes it afterwards. It skips repositories without a `go.mod` at the root. `go` must be on `PATH`.
