@@ -97,12 +97,12 @@ Results: `github-release` adds `"assets": [names]`; `npm-publish` `{"name", "ver
 
 ## Phases and tasks
 <!-- Release PR: release/go-apps-p<n> → main; last reviewed commit: 85e66a3 (2026-11-22, 6 findings: 0 critical, 0 high, 1 medium, 5 low) -->
-**Phase 1 release:** `release/go-apps-p1` (cut 2026-11-22), release PR [#20](https://github.com/GutiNicolas/release-cli/pull/20).
+**Phase 1 release:** merged 2026-11-22 via [#20](https://github.com/GutiNicolas/release-cli/pull/20) (merge commit fe3feee); `release/go-apps-p1` deleted.
 ### Phase 1: Go projects and `v` tags (shippable alone: `release -rc` tags a Go app)
 | Task | Repo | Depends on | Status | PR | Note |
 |---|---|---|---|---|---|
-| [T-01](tasks/T-01.md) Configurable tag format (`v` tags) | release-cli | — | integrated | [#19](https://github.com/GutiNicolas/release-cli/pull/19) | |
-| [T-02](tasks/T-02.md) `go` tool: detection and `VERSION` file | release-cli | T-01 | integrated | [#21](https://github.com/GutiNicolas/release-cli/pull/21) | |
+| [T-01](tasks/T-01.md) Configurable tag format (`v` tags) | release-cli | — | merged | [#19](https://github.com/GutiNicolas/release-cli/pull/19) | |
+| [T-02](tasks/T-02.md) `go` tool: detection and `VERSION` file | release-cli | T-01 | merged | [#21](https://github.com/GutiNicolas/release-cli/pull/21) | |
 
 ### Phase 2: build and publish connectors, dry-run that builds
 | Task | Repo | Depends on | Status | PR | Note |
@@ -138,3 +138,4 @@ Results: `github-release` adds `"assets": [names]`; `npm-publish` `{"name", "ver
 - 2026-11-22: user decisions: native build, `VERSION` file (T-02 reworked), naming localci here is fine. Provenance at launch still open.
 - 2026-11-22: provenance before launch, in the local CI: phase 3 is now key-signed provenance (T-08 `sign`); the GitHub workflow work moved to phase 5 (T-10).
 - 2026-11-22: approved by the user; plan put on main through a docs-only PR.
+- 2026-11-22: phase 1 merged to main (#20): T-01, T-02 and one review fix (fix(T-01): `tag_format` refuses templates git cannot tag). Phase 2 is ready to dispatch.
