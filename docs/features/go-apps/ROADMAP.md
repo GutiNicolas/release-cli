@@ -105,14 +105,14 @@ Results: `github-release` adds `"assets": [names]`; `npm-publish` `{"name", "ver
 | [T-02](tasks/T-02.md) `go` tool: detection and `VERSION` file | release-cli | T-01 | merged | [#21](https://github.com/GutiNicolas/release-cli/pull/21) | |
 
 ### Phase 2: build and publish connectors, dry-run that builds
-**Phase 2 release:** `release/go-apps-p2` (cut 2026-11-22), release PR [#23](https://github.com/GutiNicolas/release-cli/pull/23). Last reviewed: 888348f (2026-11-23, 9 findings: 0 critical, 0 high, 4 medium, 5 low).
+**Phase 2 release:** merged 2026-11-23 via [#23](https://github.com/GutiNicolas/release-cli/pull/23) (merge commit 62612bc); last reviewed: aced88d (2026-11-23; round 1 at 888348f: 9 findings, 0 critical, 0 high, 4 medium fixed, 5 low open; round 2 over the fixes: 1 low).
 | Task | Repo | Depends on | Status | PR | Note |
 |---|---|---|---|---|---|
-| [T-03](tasks/T-03.md) Dry-run runs connectors that declare it safe | release-cli | P1 | integrated | [#22](https://github.com/GutiNicolas/release-cli/pull/22) | |
-| [T-04](tasks/T-04.md) `go-build` connector and Go fixture | release-cli | T-03 | integrated | [#24](https://github.com/GutiNicolas/release-cli/pull/24) | |
-| [T-05](tasks/T-05.md) `github-release` uploads the manifest's assets | release-cli | T-04 | integrated | [#26](https://github.com/GutiNicolas/release-cli/pull/26) | parallel with T-06, T-07 |
-| [T-06](tasks/T-06.md) `npm-publish` connector (lockstep) | release-cli | T-04 | integrated | [#25](https://github.com/GutiNicolas/release-cli/pull/25) | parallel |
-| [T-07](tasks/T-07.md) `homebrew-tap` connector and install script | release-cli | T-04 | integrated | [#27](https://github.com/GutiNicolas/release-cli/pull/27) | parallel |
+| [T-03](tasks/T-03.md) Dry-run runs connectors that declare it safe | release-cli | P1 | merged | [#22](https://github.com/GutiNicolas/release-cli/pull/22) | |
+| [T-04](tasks/T-04.md) `go-build` connector and Go fixture | release-cli | T-03 | merged | [#24](https://github.com/GutiNicolas/release-cli/pull/24) | |
+| [T-05](tasks/T-05.md) `github-release` uploads the manifest's assets | release-cli | T-04 | merged | [#26](https://github.com/GutiNicolas/release-cli/pull/26) | parallel with T-06, T-07 |
+| [T-06](tasks/T-06.md) `npm-publish` connector (lockstep) | release-cli | T-04 | merged | [#25](https://github.com/GutiNicolas/release-cli/pull/25) | parallel |
+| [T-07](tasks/T-07.md) `homebrew-tap` connector and install script | release-cli | T-04 | merged | [#27](https://github.com/GutiNicolas/release-cli/pull/27) | parallel |
 
 ### Phase 3: signed provenance, local (before localci's launch)
 | Task | Repo | Depends on | Status | PR | Note |
@@ -141,3 +141,4 @@ Results: `github-release` adds `"assets": [names]`; `npm-publish` `{"name", "ver
 - 2026-11-22: approved by the user; plan put on main through a docs-only PR.
 - 2026-11-22: phase 1 merged to main (#20): T-01, T-02 and one review fix (`fix(T-01)`: `tag_format` refuses templates git cannot tag). Phase 2 is ready to dispatch.
 - 2026-11-22: phase 1 merged to main (#20): T-01, T-02 and one review fix (fix(T-01): `tag_format` refuses templates git cannot tag). Phase 2 is ready to dispatch.
+- 2026-11-23: phase 2 merged to main (#23): T-03 to T-07 and four review fixes (`fix(T-06)`: npm packs `package_dir` from the release commit; `fix(T-07)`: homebrew-tap skips when github-release did not publish; `fix(T-05)`: assets compared by digest, not size; the formula is not a release asset). Open lows for later: hotfix overwriting a newer formula, archive extras collisions, `GOFLAGS` overwritten, install.sh hardening, timeouts on go/git/gh, `tarfile` `filter=` needs Python 3.11.4+. Phase 3 (T-08 `sign`) is ready to dispatch.
