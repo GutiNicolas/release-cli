@@ -102,7 +102,7 @@ Results: `github-release` adds `"assets": [names]`; `npm-publish` `{"name", "ver
 | Task | Repo | Depends on | Status | PR | Note |
 |---|---|---|---|---|---|
 | [T-01](tasks/T-01.md) Configurable tag format (`v` tags) | release-cli | — | integrated | [#19](https://github.com/GutiNicolas/release-cli/pull/19) | |
-| [T-02](tasks/T-02.md) `go` tool: detection and `VERSION` file | release-cli | T-01 | todo | | |
+| [T-02](tasks/T-02.md) `go` tool: detection and `VERSION` file | release-cli | T-01 | in progress | | |
 
 ### Phase 2: build and publish connectors, dry-run that builds
 | Task | Repo | Depends on | Status | PR | Note |
