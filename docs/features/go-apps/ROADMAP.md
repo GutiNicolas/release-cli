@@ -97,10 +97,11 @@ Results: `github-release` adds `"assets": [names]`; `npm-publish` `{"name", "ver
 
 ## Phases and tasks
 <!-- Release PR: release/go-apps-p<n> → main; last reviewed commit: -->
+**Phase 1 release:** `release/go-apps-p1` (cut 2026-11-22), release PR not open yet.
 ### Phase 1: Go projects and `v` tags (shippable alone: `release -rc` tags a Go app)
 | Task | Repo | Depends on | Status | PR | Note |
 |---|---|---|---|---|---|
-| [T-01](tasks/T-01.md) Configurable tag format (`v` tags) | release-cli | — | todo | | |
+| [T-01](tasks/T-01.md) Configurable tag format (`v` tags) | release-cli | — | in progress | | |
 | [T-02](tasks/T-02.md) `go` tool: detection and `VERSION` file | release-cli | T-01 | todo | | |
 
 ### Phase 2: build and publish connectors, dry-run that builds
