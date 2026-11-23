@@ -99,6 +99,17 @@ def fake_gh(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
         "if '--notes-file' in args:\n"
         "    entry['notes'] = open(args[args.index('--notes-file') + 1]).read()\n"
         "open(log, 'a').write(json.dumps(entry) + '\\n')\n"
+        f"assets_file = {str(tmp_path / 'assets.json')!r}\n"
+        "assets = json.load(open(assets_file)) if os.path.exists(assets_file) else []\n"
+        "if args[:2] == ['release', 'view'] and 'assets' in args:\n"
+        "    print(json.dumps({'assets': assets})); sys.exit(0)\n"
+        "if args[:2] == ['release', 'upload']:\n"
+        "    name = os.path.basename(args[3])\n"
+        "    if name == os.environ.get('FAKE_GH_FAIL_UPLOAD'):\n"
+        "        print('HTTP 502', file=sys.stderr); sys.exit(1)\n"
+        "    assets = [a for a in assets if a['name'] != name] + [{'name': name, 'size': os.path.getsize(args[3])}\n"
+        "        | ({} if os.environ.get('FAKE_GH_NO_DIGEST') else {'digest': 'sha256:' + __import__('hashlib').sha256(open(args[3], 'rb').read()).hexdigest()})]\n"
+        "    json.dump(assets, open(assets_file, 'w')); sys.exit(0)\n"
         "if args[:2] == ['release', 'view']:\n"
         f"    if os.path.exists({str(tmp_path / 'created')!r}):\n"
         "        print('https://github.com/o/r/releases/tag/' + args[2]); sys.exit(0)\n"
@@ -161,3 +172,84 @@ def test_questions_apply_only_to_github_remotes() -> None:
         assert q.applies and [i.id for i in q.items] == ["publish"]
     for url in ("git@gitlab.com:o/r.git", "https://github.com.evil.io/o/r", ""):
         assert parse_questions(gr.questions({**base, "remote_url": url})).applies is False
+
+
+def _manifest_prior(tmp_path: Path, status: str = "ok") -> dict:
+    out = tmp_path / "dist"
+    out.mkdir(exist_ok=True)
+    artifacts = []
+    for name, kind in [("app_1.0.0_linux_amd64.tar.gz", "archive"), ("app_1.0.0_darwin_arm64.tar.gz", "archive"), ("checksums.txt", "checksums"), ("install.sh", "installer"), ("app-1.0.0.tgz", "npm")]:
+        (out / name).write_bytes(name.encode())
+        artifacts.append({"name": name, "kind": kind, "sha256": "x", "size": len(name)})
+    result = {"app": "app", "version": "1.0.0", "tag": "1.0.0-rc1", "commit": "abc", "dir": str(out), "artifacts": artifacts}
+    return {"go-build": {"status": status, "result": result, "error": None, "job_id": None}}
+
+
+def _uploads(log: Path) -> list[str]:
+    return [Path(c["args"][3]).name for c in _calls(log) if c["args"][:2] == ["release", "upload"]]
+
+
+def test_run_uploads_every_manifest_asset_but_the_npm_tgz_and_resume_sends_only_missing(repo: Path, fake_gh: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    req = {**_req(repo, "1.0.0-rc1"), "prior": _manifest_prior(tmp_path)}
+    monkeypatch.setenv("FAKE_GH_FAIL_UPLOAD", "install.sh")
+    failed = gr.run(req)
+    assert failed["ok"] is False and "install.sh" in failed["error"] and "HTTP 502" in failed["error"]
+    assert failed["result"]["url"].endswith("1.0.0-rc1")  # the release exists, so a resume reuses it
+    calls = _calls(fake_gh)
+    assert [c["args"][:2] for c in calls if c["args"][0] == "release"][:2] == [["release", "view"], ["release", "create"]]
+    assert all("--clobber" in c["args"] for c in calls if c["args"][:2] == ["release", "upload"])
+
+    monkeypatch.delenv("FAKE_GH_FAIL_UPLOAD")
+    fake_gh.unlink()
+    resumed = parse_run(gr.run(req))
+    assert resumed.status == "ok"
+    assert _uploads(fake_gh) == ["install.sh"]  # the archives and checksums made it the first time
+    assert not [c for c in _calls(fake_gh) if c["args"][:2] == ["release", "create"]]
+    assert resumed.result["assets"] == ["app_1.0.0_linux_amd64.tar.gz", "app_1.0.0_darwin_arm64.tar.gz", "checksums.txt", "install.sh"]
+    assert resumed.result["uploaded"] == ["install.sh"]
+
+
+def test_run_reuploads_an_asset_whose_content_differs_even_at_the_same_size(repo: Path, fake_gh: Path, tmp_path: Path) -> None:
+    req = {**_req(repo, "1.0.0-rc1"), "prior": _manifest_prior(tmp_path)}
+    assert gr.run(req)["ok"]
+    assert len(_uploads(fake_gh)) == 4
+    fake_gh.unlink()
+    assert gr.run(req)["result"]["uploaded"] == []  # nothing changed: nothing sent
+    fake_gh.unlink()
+    archive = tmp_path / "dist" / "app_1.0.0_linux_amd64.tar.gz"
+    rebuilt = bytes(reversed(archive.read_bytes()))  # a resume rebuilt it: same size, other bytes
+    assert rebuilt != archive.read_bytes()
+    archive.write_bytes(rebuilt)
+    assert gr.run(req)["result"]["uploaded"] == [archive.name]
+
+
+def test_run_reuploads_everything_when_the_release_gives_no_digest(repo: Path, fake_gh: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("FAKE_GH_NO_DIGEST", "1")
+    req = {**_req(repo, "1.0.0-rc1"), "prior": _manifest_prior(tmp_path)}
+    assert gr.run(req)["ok"]
+    fake_gh.unlink()
+    assert len(gr.run(req)["result"]["uploaded"]) == 4  # the size alone proves nothing
+
+
+def test_run_without_a_good_go_build_uploads_nothing(repo: Path, fake_gh: Path, tmp_path: Path) -> None:
+    for prior in ({}, _manifest_prior(tmp_path, status="failed")):
+        res = gr.run({**_req(repo, "1.0.0-rc1"), "prior": prior})
+        assert res["ok"] and "assets" not in res["result"]
+    assert _uploads(fake_gh) == []
+
+
+def test_run_fails_when_a_listed_asset_is_not_on_disk(repo: Path, fake_gh: Path, tmp_path: Path) -> None:
+    prior = _manifest_prior(tmp_path)
+    (tmp_path / "dist" / "checksums.txt").unlink()
+    res = gr.run({**_req(repo, "1.0.0-rc1"), "prior": prior})
+    assert res["ok"] is False and "checksums.txt" in res["error"]
+    assert not fake_gh.exists()  # nothing was created before the check
+
+
+def test_dry_run_lists_the_assets_and_calls_no_gh(repo: Path, fake_gh: Path, tmp_path: Path, capfd: pytest.CaptureFixture[str]) -> None:
+    assert parse_questions(gr.questions({"release_version": "1.0.0", "remote_url": "git@github.com:o/r.git"})).dry_run_safe
+    out = parse_run(gr.run({**_req(repo, "1.0.0-rc1"), "dry_run": True, "prior": _manifest_prior(tmp_path)}))
+    assert out.status == "ok" and out.result["published"] is False
+    assert out.result["assets"] == ["app_1.0.0_linux_amd64.tar.gz", "app_1.0.0_darwin_arm64.tar.gz", "checksums.txt", "install.sh"]
+    assert "install.sh" in capfd.readouterr().err
+    assert not fake_gh.exists()

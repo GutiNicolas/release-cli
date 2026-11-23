@@ -311,6 +311,30 @@ def test_json_stdout_is_one_object_even_with_hook_output(repo: Path) -> None:
     assert "hook-noise" in done.stderr and "STARTING RELEASE" in done.stderr
 
 
+def test_dry_run_builds_into_a_temp_dir_and_tags_nothing(repo: Path) -> None:
+    install_fakes(("build", "safe"), ("publish", "echo"))
+    head = git(repo, "rev-parse", "HEAD")
+    done = _cli(repo, "-rc", "--defaults", "--dry-run", "--json")
+    assert done.returncode == 0, done.stderr
+    data = json.loads(done.stdout)
+    out_dir = Path(data["dry_run_dir"])
+    assert out_dir == connectors.dry_run_dir({"repo": "example-app", "release_version": "1.5.0-rc0"})
+    assert (out_dir / "build.txt").is_file()
+    assert list(data["connectors"]) == ["build"] and data["connectors"]["build"]["result"]["sha"] == head
+    assert data["connectors"]["build"]["result"]["tags"] == list(TAGS)
+    assert remote_tags(repo) == set() and local_tags(repo) == set()
+    assert connectors.load_state("example-app", "1.5.0-rc0") is None
+    assert git(repo, "status", "--porcelain") == "" and git(repo, "rev-parse", "HEAD") == head
+
+
+def test_dry_run_exits_1_when_a_safe_connector_fails(repo: Path) -> None:
+    install_fakes(("build", "safe-fail"))
+    done = _cli(repo, "-rc", "--defaults", "--dry-run", "--json")
+    assert done.returncode == 1
+    assert json.loads(done.stdout)["ok"] is False
+    assert remote_tags(repo) == set() and local_tags(repo) == set()
+
+
 def test_json_failure_is_still_json(repo: Path) -> None:
     (repo / ".gitignore").write_text(".release\nbuild/\n", encoding="utf-8")
     done = _cli(repo, "-rc", "--defaults", "--json")

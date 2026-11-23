@@ -66,8 +66,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     connector = sub.add_parser("connector", help="install and manage connectors (global, ~/.config/release/connectors.toml)")
     csub = connector.add_subparsers(dest="action", required=True)
-    add = csub.add_parser("add", help="install from a GitHub URL (pin with @ref) or add a built-in (cursor-review, github-release, jira)")
-    add.add_argument("target", help="https://github.com/org/repo[@ref], cursor-review, github-release, or jira")
+    add = csub.add_parser("add", help="install from a GitHub URL (pin with @ref) or add a built-in (cursor-review, github-release, go-build, homebrew-tap, jira, slack-notify)")
+    add.add_argument("target", help="https://github.com/org/repo[@ref], cursor-review, github-release, go-build, homebrew-tap, jira, or slack-notify")
     _defaults_flag(add)
     csub.add_parser("ls", help="list installed connectors, order, and installed SHA")
     update = csub.add_parser("update", help="reinstall a connector from its source (explicit; never during a release)")
@@ -420,6 +420,7 @@ def post_push(
     start: str | None = None,
     only: str | None = None,
     ask: prompts.Ask = input,
+    report: dict[str, Any] | None = None,
 ) -> bool:
     """The post-push phase. Returns False when a connector failed. Never resets or deletes tags."""
     conns = cx.resolve(cx.load_global(), cfg.connectors, warn=warn)
@@ -445,7 +446,7 @@ def post_push(
         prior = _prior_from(saved, names[:idx])
     return cx.run_chain(
         context, selected, state=state, prior=prior, cwd=cwd, project=dict(cfg.connectors),
-        defaults=defaults, dry_run=dry_run, log=info, ask=ask, alert=alert,
+        defaults=defaults, dry_run=dry_run, log=info, ask=ask, alert=alert, report=report,
     )
 
 

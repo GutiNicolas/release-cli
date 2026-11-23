@@ -257,6 +257,63 @@ def test_dry_run_never_saves_connector_state(project: Path) -> None:
     assert state == {}
 
 
+def test_dry_run_runs_safe_connectors_into_out_dir_and_chains_prior(project: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    install_fakes(("build", "safe"), ("sign", "safe"), ("publish", "types"))
+    report: dict[str, Any] = {}
+    cfg = load(project)
+    assert cfg is not None
+    ok = commands.post_push(project, cfg, "1.5.0-rc0", "abc123", defaults=True, dry_run=True, report=report)
+    assert ok and connectors.load_state(project.name, "1.5.0-rc0") is None
+    out_dir = Path(report["dir"])
+    assert out_dir == connectors.dry_run_dir({"repo": project.name, "release_version": "1.5.0-rc0"})
+    runs = run_requests(project)
+    assert [r["connector"] for r in runs] == ["build", "sign"], "the unsafe connector only asks"
+    assert all(r["dry_run"] and r["out_dir"] == str(out_dir) for r in runs)
+    assert (out_dir / "build.txt").read_text(encoding="utf-8") == ""
+    assert (out_dir / "sign.txt").read_text(encoding="utf-8") == "build"
+    assert report["connectors"]["sign"]["result"]["prior"] == ["build"]
+    assert "publish" not in report["connectors"]
+    assert "run not called" in capsys.readouterr().out
+
+
+def test_dry_run_starts_from_an_empty_folder(project: Path) -> None:
+    install_fakes(("build", "safe"))
+    cfg = load(project)
+    assert cfg is not None
+    out_dir = connectors.dry_run_dir({"repo": project.name, "release_version": "1.5.0-rc0"})
+    out_dir.mkdir(parents=True)
+    (out_dir / "stale.tgz").write_text("old", encoding="utf-8")
+    commands.post_push(project, cfg, "1.5.0-rc0", "abc123", defaults=True, dry_run=True, report={})
+    assert sorted(p.name for p in out_dir.iterdir()) == ["build.txt"]
+
+
+def test_dry_run_safe_failure_is_reported_and_stops_the_chain(project: Path) -> None:
+    install_fakes(("build", "safe-fail"), ("sign", "safe"))
+    cfg = load(project)
+    assert cfg is not None
+    report: dict[str, Any] = {}
+    ok = commands.post_push(project, cfg, "1.5.0-rc0", "abc123", defaults=True, dry_run=True, report=report)
+    assert not ok
+    assert report["connectors"]["build"]["status"] == "failed"
+    assert [r["connector"] for r in run_requests(project)] == ["build"]
+
+
+def test_dry_run_does_not_persist_answers_to_project_config(project: Path) -> None:
+    install_fakes(("build", "safe-int"))
+    cfg = load(project)
+    assert cfg is not None
+    assert commands.post_push(project, cfg, "1.5.0-rc0", "abc123", defaults=True, dry_run=True, report={})
+    assert run_requests(project)[0]["answers"] == {"retries": 3}
+    assert "build" not in load(project).connectors
+
+
+def test_dry_run_flag_must_be_safe() -> None:
+    with pytest.raises(connectors.ProtocolError, match="dry_run must be"):
+        connectors.parse_questions({"protocol": 1, "dry_run": "yes", "questions": []})
+    assert connectors.parse_questions({"protocol": 1, "dry_run": "safe", "questions": []}).dry_run_safe
+    assert not connectors.parse_questions({"protocol": 1, "questions": []}).dry_run_safe
+
+
 def test_int_answer_set_with_edit_is_accepted_under_defaults(project: Path) -> None:
     install_fakes(("a", "int"))
     commands.edit(project, ["config", "set", "a", "retries", "3"])

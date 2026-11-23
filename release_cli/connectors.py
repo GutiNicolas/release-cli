@@ -9,9 +9,11 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 import signal
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 from collections import deque
@@ -37,7 +39,10 @@ STDERR_TAIL = 20
 BUILTINS = {
     "cursor-review": "release_cli.cursor_review",
     "github-release": "release_cli.github_release",
+    "go-build": "release_cli.go_build",
+    "homebrew-tap": "release_cli.homebrew_tap",
     "jira": "release_cli.jira_connector",
+    "npm-publish": "release_cli.npm_publish",
     "slack-notify": "release_cli.slack_notify",
 }
 # connectors.toml [connectors.<name>.config] written when a built-in is first added.
@@ -246,6 +251,9 @@ class Questions:
     # applies=false alone: this project is not for the connector (skipped, exit 0).
     blocked: bool = False
     reason: str | None = None
+    # `"dry_run": "safe"`: under `release --dry-run` the connector may run, into `out_dir`, and must
+    # change nothing outside it (no publishing, no pushing). Without it a dry run only lists the questions.
+    dry_run_safe: bool = False
 
 
 @dataclass
@@ -293,6 +301,9 @@ def parse_questions(resp: Any) -> Questions:
     timeout = resp.get("timeout_seconds")
     if timeout is not None and (not _is_number(timeout) or timeout <= 0):
         raise ProtocolError("timeout_seconds must be a positive number")
+    dry_run = resp.get("dry_run")
+    if dry_run is not None and dry_run != "safe":
+        raise ProtocolError('dry_run must be "safe"')
     raw = resp.get("questions")
     if not isinstance(raw, list):
         raise ProtocolError("missing questions list")
@@ -306,6 +317,7 @@ def parse_questions(resp: Any) -> Questions:
         items=items,
         blocked=blocked,
         reason=reason.strip() if reason and reason.strip() else None,
+        dry_run_safe=dry_run == "safe",
     )
 
 
@@ -661,6 +673,7 @@ def collect_answers(
     project_values: dict[str, Any],
     defaults: bool,
     ask: prompts.Ask,
+    persist: bool = True,
 ) -> dict[str, Any]:
     answers: dict[str, Any] = {}
     for q in items:
@@ -680,7 +693,7 @@ def collect_answers(
         value = _ask_one(conn, q, q.default_for(answers), defaults=defaults, ask=ask)
         if value is None:
             continue
-        if q.persist == "project":
+        if q.persist == "project" and persist:  # a dry run writes no config
             set_connector_value(cwd, conn.name, q.id, value)
             project_values[q.id] = value
         answers[q.id] = value
@@ -712,6 +725,11 @@ def build_context(root: Path, remote: str, scheme: TagScheme, release_version: s
         "sha": sha,
         "mode": "rc" if "-rc" in release_version else "fv",
     }
+
+
+def dry_run_dir(context: dict[str, Any]) -> Path:
+    """Where safe connectors write under `release --dry-run`: <tmp>/release-dry-run/<repo>/<version>/."""
+    return Path(tempfile.gettempdir()) / "release-dry-run" / context["repo"] / context["release_version"]
 
 
 def new_state(context: dict[str, Any]) -> dict[str, Any]:
@@ -780,11 +798,16 @@ def run_chain(
     log: Callable[[str], None],
     ask: prompts.Ask = input,
     alert: Callable[[str], None] | None = None,
+    report: dict[str, Any] | None = None,
 ) -> bool:
     """Ask every enabled connector, then run that chain. Returns False if any failed. Never touches git.
 
     `prior` during questions is only what already finished (a resume). Connectors about to run in
     this invocation are not in it yet, so they must ask without that result and refuse at run time.
+
+    In a dry run only connectors that answered `"dry_run": "safe"` run, in order, into a fresh temp
+    folder (`out_dir`); nothing is saved. `report` then gets `dir` and `connectors` (name -> outcome of
+    those safe connectors), so the caller can fail on one that did not finish ok.
     """
     tag = tag_of(context)
     alert = alert or log  # failures and resume hints; the CLI keeps them visible under --quiet
@@ -798,6 +821,8 @@ def run_chain(
     early: dict[str, Outcome] = {}
     all_ok = True
     ask_further = True
+    dry_safe: set[str] = set()
+    out_dir: Path | None = None
 
     def record(conn: Connector, outcome: Outcome, resume_job: str | None, *, publish: bool = True) -> bool:
         """Persist and log `outcome`. True when break_on_error stops the rest of the chain.
@@ -813,6 +838,8 @@ def run_chain(
             save_state(state)
         if publish:
             prior[conn.name] = outcome.entry()
+        if report is not None and conn.name in dry_safe:
+            report.setdefault("connectors", {})[conn.name] = outcome.entry()
         if outcome.status == "ok":
             log(f"{conn.name}: ok")
             return False
@@ -820,7 +847,10 @@ def run_chain(
         alert(f"{conn.name}: {outcome.status}: {outcome.error or 'no reason given'}")
         if outcome.job_id:
             alert(f"  job_id: {outcome.job_id}")
-        alert(f"  the tag {tag} stays pushed. resume: {resume_hint(tag, conn.name)}")
+        if dry_run:
+            alert("  dry-run: nothing was tagged, pushed or published")
+        else:
+            alert(f"  the tag {tag} stays pushed. resume: {resume_hint(tag, conn.name)}")
         if outcome.ctrl_c:
             raise ChainInterrupted(conn.name)
         return outcome.status != "ok" and conn.break_on_error
@@ -829,7 +859,7 @@ def run_chain(
         if not conn.enabled or not ask_further:
             continue
         previous = saved.get(conn.name) or {}
-        resume_job = previous.get("job_id") if previous.get("status") == "interrupted" else None
+        resume_job = previous.get("job_id") if previous.get("status") == "interrupted" and not dry_run else None
         project_values = dict(project.get(conn.name, {}))
         request = {
             **context,
@@ -839,6 +869,7 @@ def run_chain(
             "prior": prior,
             "config": dict(conn.config),
             "resume_job_id": resume_job,
+            "out_dir": None,
         }
         log(f"CONNECTOR {conn.name}" + (f" (resuming job {resume_job})" if resume_job else ""))
         try:
@@ -852,12 +883,16 @@ def run_chain(
                 why = f": {qs.reason}" if qs.reason else " (the connector gave no reason)"
                 log(f"skipping {conn.name}: does not apply to this project{why}")
                 continue
-            if dry_run:
+            if dry_run and not qs.dry_run_safe:
                 for q in qs.items:
                     log(f"  ? {describe(q)}")
                 log(f"  (dry-run: {conn.name} run not called)")
                 continue
-            answers = collect_answers(conn, qs.items, cwd=cwd, project_values=project_values, defaults=defaults, ask=ask)
+            if dry_run:
+                dry_safe.add(conn.name)
+            answers = collect_answers(
+                conn, qs.items, cwd=cwd, project_values=project_values, defaults=defaults, ask=ask, persist=not dry_run
+            )
         except ConnectorError as exc:
             outcome = Outcome(status="failed", error=str(exc))
             early[conn.name] = outcome
@@ -870,8 +905,14 @@ def run_chain(
         request["config"] = {**conn.config, **project_values}
         ready[conn.name] = (request, answers, timeout, resume_job)
 
-    if dry_run:
-        return all_ok
+    if dry_run and ready:
+        # a stale folder from an earlier dry run would show artifacts this run did not build
+        out_dir = dry_run_dir(context)
+        shutil.rmtree(out_dir, ignore_errors=True)
+        out_dir.mkdir(parents=True)
+        if report is not None:
+            report["dir"] = str(out_dir)
+        log(f"DRY-RUN DIR: {out_dir}")
 
     for conn in conns:
         if conn.name in early:
@@ -885,7 +926,8 @@ def run_chain(
             continue
         request, answers, timeout, resume_job = planned
         log(f"running {conn.name}" + (f" (resuming job {resume_job})" if resume_job else ""))
-        outcome = run_connector(conn, {**request, "action": "run", "answers": answers}, timeout)
+        run_request = {**request, "action": "run", "answers": answers, "out_dir": str(out_dir) if out_dir else None}
+        outcome = run_connector(conn, run_request, timeout)
         if record(conn, outcome, resume_job):
             log(f"  break_on_error: chain stopped after {conn.name}")
             break

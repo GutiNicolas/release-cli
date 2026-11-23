@@ -80,7 +80,7 @@ Build flags are fixed: `-trimpath`, `GOOS`/`GOARCH` per target, `GOFLAGS=-mod=re
 <binary>_<version>_<os>_<arch>.tar.gz    # one per target: <binary>, plus archive_files
 checksums.txt                            # "<sha256>  <file>" per line, sorted by file name
 <npm-name>-<version>.tgz                 # npm pack, when npm-publish is enabled
-<binary>.rb                              # Homebrew formula (finals; rendered in dry-run too)
+<binary>.rb                              # Homebrew formula (finals): lives in the tap repo, not on the GitHub Release; also in the dry-run folder
 install.sh                               # installer: detects os/arch, downloads, verifies checksums.txt
 manifest.json
 checksums.txt.sig                        # phase 3: cosign signature bundle of checksums.txt
@@ -105,13 +105,14 @@ Results: `github-release` adds `"assets": [names]`; `npm-publish` `{"name", "ver
 | [T-02](tasks/T-02.md) `go` tool: detection and `VERSION` file | release-cli | T-01 | merged | [#21](https://github.com/GutiNicolas/release-cli/pull/21) | |
 
 ### Phase 2: build and publish connectors, dry-run that builds
+**Phase 2 release:** `release/go-apps-p2` (cut 2026-11-22), release PR [#23](https://github.com/GutiNicolas/release-cli/pull/23). Last reviewed: 888348f (2026-11-23, 9 findings: 0 critical, 0 high, 4 medium, 5 low).
 | Task | Repo | Depends on | Status | PR | Note |
 |---|---|---|---|---|---|
-| [T-03](tasks/T-03.md) Dry-run runs connectors that declare it safe | release-cli | P1 | todo | | |
-| [T-04](tasks/T-04.md) `go-build` connector and Go fixture | release-cli | T-03 | todo | | |
-| [T-05](tasks/T-05.md) `github-release` uploads the manifest's assets | release-cli | T-04 | todo | | parallel with T-06, T-07 |
-| [T-06](tasks/T-06.md) `npm-publish` connector (lockstep) | release-cli | T-04 | todo | | parallel |
-| [T-07](tasks/T-07.md) `homebrew-tap` connector and install script | release-cli | T-04 | todo | | parallel |
+| [T-03](tasks/T-03.md) Dry-run runs connectors that declare it safe | release-cli | P1 | integrated | [#22](https://github.com/GutiNicolas/release-cli/pull/22) | |
+| [T-04](tasks/T-04.md) `go-build` connector and Go fixture | release-cli | T-03 | integrated | [#24](https://github.com/GutiNicolas/release-cli/pull/24) | |
+| [T-05](tasks/T-05.md) `github-release` uploads the manifest's assets | release-cli | T-04 | integrated | [#26](https://github.com/GutiNicolas/release-cli/pull/26) | parallel with T-06, T-07 |
+| [T-06](tasks/T-06.md) `npm-publish` connector (lockstep) | release-cli | T-04 | integrated | [#25](https://github.com/GutiNicolas/release-cli/pull/25) | parallel |
+| [T-07](tasks/T-07.md) `homebrew-tap` connector and install script | release-cli | T-04 | integrated | [#27](https://github.com/GutiNicolas/release-cli/pull/27) | parallel |
 
 ### Phase 3: signed provenance, local (before localci's launch)
 | Task | Repo | Depends on | Status | PR | Note |
