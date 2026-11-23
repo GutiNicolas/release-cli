@@ -105,9 +105,10 @@ Results: `github-release` adds `"assets": [names]`; `npm-publish` `{"name", "ver
 | [T-02](tasks/T-02.md) `go` tool: detection and `VERSION` file | release-cli | T-01 | merged | [#21](https://github.com/GutiNicolas/release-cli/pull/21) | |
 
 ### Phase 2: build and publish connectors, dry-run that builds
+**Phase 2 release:** `release/go-apps-p2` (cut 2026-11-22), release PR not open yet.
 | Task | Repo | Depends on | Status | PR | Note |
 |---|---|---|---|---|---|
-| [T-03](tasks/T-03.md) Dry-run runs connectors that declare it safe | release-cli | P1 | todo | | |
+| [T-03](tasks/T-03.md) Dry-run runs connectors that declare it safe | release-cli | P1 | in progress | | |
 | [T-04](tasks/T-04.md) `go-build` connector and Go fixture | release-cli | T-03 | todo | | |
 | [T-05](tasks/T-05.md) `github-release` uploads the manifest's assets | release-cli | T-04 | todo | | parallel with T-06, T-07 |
 | [T-06](tasks/T-06.md) `npm-publish` connector (lockstep) | release-cli | T-04 | todo | | parallel |
