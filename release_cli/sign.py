@@ -23,6 +23,7 @@ import binascii
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -145,16 +146,29 @@ def _write_private(path: Path, text: str) -> None:
         fh.write(text)
 
 
+SCP_REMOTE = re.compile(r"^(?:[^@/\s]+@)?(?P<host>[^:/\s@]+):(?P<path>(?!//)[^\s]+)$")
+
+
 def _source_repository(remote: Any) -> str:
-    """The remote URL without credentials."""
-    if not isinstance(remote, str):
-        return ""
-    url = remote.strip()
+    """The remote as an https URL without credentials (`git@host:o/r.git` and `ssh://` remotes included), so a
+    verifier can match it. Raises when no repository can be derived: provenance never names an empty source."""
+    url = remote.strip() if isinstance(remote, str) else ""
+    host = path = ""
     if "://" in url:
         parts = urlsplit(url)
-        host = parts.hostname or ""
-        url = f"{parts.scheme}://{host}{f':{parts.port}' if parts.port else ''}{parts.path}"
-    return url.removesuffix(".git")
+        host, path = parts.hostname or "", parts.path
+        if parts.scheme in ("http", "https") and parts.port:
+            host = f"{host}:{parts.port}"  # an ssh port is not the web port, an http(s) one is
+    elif (scp := SCP_REMOTE.match(url)) is not None:
+        host, path = scp["host"], "/" + scp["path"].lstrip("/")
+    path = path.removesuffix("/").removesuffix(".git")
+    if not host or len(path.strip("/").split("/")) < 2 or not all(path.strip("/").split("/")):
+        raise SignError(f"cannot derive the source repository from the git remote {_redact(url)!r}; set `origin` to the repository URL (for example https://github.com/<owner>/<repo>)")
+    return f"https://{host}{path}"
+
+
+def _redact(url: str) -> str:
+    return re.sub(r"//[^@/]*@", "//", url) if url else "(none)"
 
 
 def _release_cli_version() -> str:

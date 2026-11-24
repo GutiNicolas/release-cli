@@ -130,6 +130,28 @@ def test_credentials_in_the_remote_url_never_reach_the_statement() -> None:
     assert "hunter2" not in json.dumps(stmt) and stmt["predicate"]["buildDefinition"]["externalParameters"]["source"]["repository"] == "https://github.com/acme/hello"
 
 
+_ONE_ARCHIVE = {"tag": TAG, "commit": "abc", "artifacts": [{"name": "a.tar.gz", "kind": "archive", "sha256": "f" * 64}]}
+
+
+@pytest.mark.parametrize("remote", [
+    "https://github.com/acme/hello.git",
+    "git@github.com:acme/hello.git",
+    "ssh://git@github.com/acme/hello.git",
+    "ssh://git@github.com:22/acme/hello",
+])
+def test_every_remote_form_names_the_same_https_source(remote: str) -> None:
+    stmt = sign.statement(_ONE_ARCHIVE, {"remote_url": remote, "tag": TAG})
+    build = stmt["predicate"]["buildDefinition"]
+    assert build["externalParameters"]["source"]["repository"] == "https://github.com/acme/hello"
+    assert build["resolvedDependencies"][0]["uri"] == f"git+https://github.com/acme/hello@refs/tags/{TAG}"
+
+
+@pytest.mark.parametrize("remote", [None, "", "  ", "hello"])
+def test_a_remote_that_names_no_repository_is_refused_not_signed_empty(remote: Any) -> None:
+    with pytest.raises(sign.SignError, match="remote"):
+        sign.statement(_ONE_ARCHIVE, {"remote_url": remote, "tag": TAG})
+
+
 def _keypair(tmp_path: Path) -> tuple[str, str]:
     keys = tmp_path / "keys"
     keys.mkdir()
