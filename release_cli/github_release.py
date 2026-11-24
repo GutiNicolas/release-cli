@@ -4,7 +4,7 @@ Uses the `gh` CLI (installed and authenticated by the user). Idempotent: when th
 already exists (resume after a failure) it is reported, not recreated.
 
 When `go-build` finished ok, the files of its manifest (archives, checksums, installer, formula;
-not the npm package) are uploaded to the release; a resume uploads only the ones still missing.
+not the npm package) and the signature, provenance and public key that `sign` added are uploaded to the release; a resume uploads only the ones still missing.
 Under `release --dry-run` it calls no `gh` and only lists what it would upload.
 
     python -m release_cli.github_release questions|run   (protocol 1 on stdin/stdout)
@@ -116,13 +116,22 @@ def _manifest(req: dict[str, Any]) -> dict[str, Any] | None:
     return result
 
 
-def _assets(manifest: dict[str, Any]) -> list[tuple[str, Path, int | None]]:
+def _signed(req: dict[str, Any]) -> list[Any]:
+    """The files `sign` added (signature, provenance, public key) when it finished ok; go-build's own manifest does not list them."""
+    entry = (req.get("prior") or {}).get("sign") or {}
+    files = (entry.get("result") or {}).get("artifacts") if entry.get("status") == "ok" else None
+    return files if isinstance(files, list) else []
+
+
+def _assets(manifest: dict[str, Any], extra: list[Any] | None = None) -> list[tuple[str, Path, int | None]]:
     """(name, file, expected size) of every manifest file that belongs on the GitHub Release (all but the npm tgz)."""
     out_dir = Path(manifest.get("dir") or "")
     found = []
-    for item in manifest["artifacts"]:
-        if not isinstance(item, dict) or not item.get("name") or item.get("kind") == "npm":
+    seen: set[str] = set()
+    for item in [*manifest["artifacts"], *(extra or [])]:
+        if not isinstance(item, dict) or not item.get("name") or item.get("kind") == "npm" or item["name"] in seen:
             continue
+        seen.add(item["name"])
         path = out_dir / item["name"]
         if not path.is_file():
             raise AssetError(f"asset {item['name']} listed in the go-build manifest is missing from {out_dir}")
@@ -179,7 +188,7 @@ def _dry_run(req: dict[str, Any]) -> dict[str, Any]:
     tag = tag_of(req)
     manifest = _manifest(req)
     try:
-        names = [name for name, _, _ in _assets(manifest)] if manifest else []
+        names = [name for name, _, _ in _assets(manifest, _signed(req))] if manifest else []
     except AssetError as exc:
         return _fail(str(exc), published=False, dry_run=True)
     print(f"dry run: would create the GitHub Release {tag} and upload {len(names)} assets", file=sys.stderr)
@@ -206,7 +215,7 @@ def run(req: dict[str, Any]) -> dict[str, Any]:
 
     try:
         manifest = _manifest(req)
-        assets = _assets(manifest) if manifest else []
+        assets = _assets(manifest, _signed(req)) if manifest else []
         existing = call("release", "view", tag, "--json", "url", "--jq", ".url")
         if existing.returncode == 0:
             result: dict[str, Any] = {"published": True, "existed": True, "url": existing.stdout.strip()}

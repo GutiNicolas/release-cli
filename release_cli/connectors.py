@@ -43,6 +43,7 @@ BUILTINS = {
     "homebrew-tap": "release_cli.homebrew_tap",
     "jira": "release_cli.jira_connector",
     "npm-publish": "release_cli.npm_publish",
+    "sign": "release_cli.sign",
     "slack-notify": "release_cli.slack_notify",
 }
 # connectors.toml [connectors.<name>.config] written when a built-in is first added.

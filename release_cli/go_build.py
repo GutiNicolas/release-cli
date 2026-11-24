@@ -180,7 +180,8 @@ def _package(src: Path, work: Path, out_dir: Path, req: dict[str, Any], spec: di
         artifacts.append({"name": "install.sh", "kind": "installer", "sha256": _sha256(installer), "size": installer.stat().st_size})
     else:
         print("go-build: the remote is not on github.com, so install.sh is not rendered", file=sys.stderr)
-    manifest = {"app": req.get("artifact") or spec["binary"], "version": version, "tag": tag, "commit": sha, "dir": str(out_dir), "artifacts": artifacts}
+    build = {"main": spec["main"], "targets": spec["targets"], "ldflags": spec["ldflags"], "cgo": spec["cgo"], "flags": ["-trimpath", "-mod=readonly"]}
+    manifest = {"app": req.get("artifact") or spec["binary"], "version": version, "tag": tag, "commit": sha, "dir": str(out_dir), "artifacts": artifacts, "build": build}
     (stage / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     # every target built: only now does anything reach the output folder, so a failure leaves no partial manifest
     out_dir.mkdir(parents=True, exist_ok=True)
