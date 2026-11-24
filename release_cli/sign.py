@@ -3,7 +3,7 @@
 Runs after `go-build` (it reads its manifest from `prior`). With `cosign`:
   * signs `checksums.txt` -> `checksums.txt.sig` (a cosign bundle),
   * writes an in-toto statement with a SLSA provenance predicate (subjects: every archive and its sha256; builder:
-    release-cli and its version; source: repo, tag, commit; the build flags) and signs it with `cosign attest-blob`
+    release-cli and its version, or the configured `builder_id`; source: repo, tag, commit; the build flags) and signs it with `cosign attest-blob`
     -> `<binary>_<version>.intoto.jsonl`,
   * copies the public key next to them as `cosign.pub`,
 and adds the three to `manifest.json` (and to this connector's result, which `github-release` uploads).
@@ -45,6 +45,7 @@ REPO_URL = "https://github.com/GutiNicolas/release-cli"
 STATEMENT_TYPE = "https://in-toto.io/Statement/v1"
 PREDICATE_TYPE = "https://slsa.dev/provenance/v1"
 BUILD_TYPE = f"{REPO_URL}/go-build/v1"
+BUILD_TYPE_SUFFIX = "/go-build/v1"
 COSIGN_MISSING = "`cosign` is not on PATH; install it (macOS: `brew install cosign`; other systems: https://docs.sigstore.dev/cosign/system_config/installation/) and make sure `cosign version` works in this shell"
 # cosign 3 sends every signature to the public Rekor log unless it is given a signing config that names no
 # transparency log (or timestamp, certificate or OIDC) service: this one names none.
@@ -73,9 +74,21 @@ def _settings(req: dict[str, Any]) -> dict[str, Any]:
     for name, value in out.items():
         if not isinstance(value, str) or not value:
             raise SignError(f"`{name}` under [connectors.sign] must be text")
+    builder_id = cfg.get("builder_id")
+    if builder_id is not None:
+        out["builder_id"] = _builder_id(builder_id)
     if cfg.get("tlog", False) is not False:
         raise SignError("`tlog = true` is not supported: `sign` never uploads to a transparency log (leave `tlog` unset or false)")
     return out
+
+
+def _builder_id(value: Any) -> str:
+    """`builder_id` as an https URL without a trailing slash (buildType is `<builder_id>/go-build/v1`)."""
+    text = value.strip().rstrip("/") if isinstance(value, str) else ""
+    parts = urlsplit(text)
+    if parts.scheme != "https" or not parts.hostname or any(c.isspace() for c in text):
+        raise SignError("`builder_id` under [connectors.sign] must be an https:// URL, for example https://github.com/acme/app (or leave it unset)")
+    return text
 
 
 def _manifest(req: dict[str, Any]) -> dict[str, Any]:
@@ -178,27 +191,32 @@ def _release_cli_version() -> str:
         return "unknown"
 
 
-def statement(manifest: dict[str, Any], req: dict[str, Any]) -> dict[str, Any]:
-    """The in-toto statement: SLSA provenance for every archive of the manifest."""
+def statement(manifest: dict[str, Any], req: dict[str, Any], builder_id: str | None = None) -> dict[str, Any]:
+    """The in-toto statement: SLSA provenance for every archive of the manifest. With `builder_id` the builder is that
+    URL, the build type hangs off it and no tool name or version appears; without it the builder is release-cli."""
     archives = sorted((a for a in manifest["artifacts"] if isinstance(a, dict) and a.get("kind") == "archive"), key=lambda a: a["name"])
     if not archives:
         raise SignError("the go-build manifest lists no archive to attest")
     tag, sha = manifest.get("tag") or tag_of(req), manifest["commit"]
     repo = _source_repository(req.get("remote_url"))
+    if builder_id:
+        build_type, builder = f"{builder_id}{BUILD_TYPE_SUFFIX}", {"id": builder_id}
+    else:
+        build_type, builder = BUILD_TYPE, {"id": REPO_URL, "version": {"release-cli": _release_cli_version()}}
     return {
         "_type": STATEMENT_TYPE,
         "subject": [{"name": a["name"], "digest": {"sha256": a["sha256"]}} for a in archives],
         "predicateType": PREDICATE_TYPE,
         "predicate": {
             "buildDefinition": {
-                "buildType": BUILD_TYPE,
+                "buildType": build_type,
                 "externalParameters": {
                     "source": {"repository": repo, "tag": tag, "commit": sha},
                     "build": manifest.get("build") or {},
                 },
                 "resolvedDependencies": [{"uri": f"git+{repo}@refs/tags/{tag}", "digest": {"gitCommit": sha}}],
             },
-            "runDetails": {"builder": {"id": REPO_URL, "version": {"release-cli": _release_cli_version()}}},
+            "runDetails": {"builder": builder},
         },
     }
 
@@ -230,14 +248,14 @@ def _check_on_disk(out_dir: Path, manifest: dict[str, Any]) -> None:
             raise SignError(f"checksums.txt does not list the sha256 of {entry['name']} that is on disk; run go-build again")
 
 
-def _sign_all(cosign: Cosign, pub: Path, out_dir: Path, manifest: dict[str, Any], req: dict[str, Any]) -> list[dict[str, Any]]:
+def _sign_all(cosign: Cosign, pub: Path, out_dir: Path, manifest: dict[str, Any], req: dict[str, Any], builder_id: str | None = None) -> list[dict[str, Any]]:
     version = manifest["version"]
     binary = next((a["name"].split(f"_{version}_", 1)[0] for a in manifest["artifacts"] if isinstance(a, dict) and a.get("kind") == "archive"), manifest["app"])
     _check_on_disk(out_dir, manifest)
     checksums = out_dir / "checksums.txt"
     attestation = out_dir / f"{binary}_{version}.intoto.jsonl"
     statement_file = cosign.workdir / "statement.json"
-    statement_file.write_text(json.dumps(statement(manifest, req), indent=2) + "\n", encoding="utf-8")
+    statement_file.write_text(json.dumps(statement(manifest, req, builder_id), indent=2) + "\n", encoding="utf-8")
     sig = out_dir / SIGNATURE
     for stale in (sig, attestation):
         stale.unlink(missing_ok=True)
@@ -306,7 +324,7 @@ def run(req: dict[str, Any]) -> dict[str, Any]:
                 _write_private(key_file, pem)
                 cosign = Cosign(exe, work, key_file, password, hide)
             try:
-                added = _sign_all(cosign, pub, out_dir, manifest, req)
+                added = _sign_all(cosign, pub, out_dir, manifest, req, spec.get("builder_id"))
             finally:
                 (work / "cosign.key").unlink(missing_ok=True)
         _update_manifest(out_dir, added)
