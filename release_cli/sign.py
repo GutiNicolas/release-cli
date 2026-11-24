@@ -207,12 +207,34 @@ def _entry(path: Path, kind: str) -> dict[str, Any]:
     return {"name": path.name, "kind": kind, "sha256": _sha256(path), "size": path.stat().st_size}
 
 
-def _sign_all(cosign: Cosign, pub: Path, out_dir: Path, manifest: dict[str, Any], req: dict[str, Any]) -> list[dict[str, Any]]:
-    version = manifest["version"]
-    binary = next((a["name"].split(f"_{version}_", 1)[0] for a in manifest["artifacts"] if isinstance(a, dict) and a.get("kind") == "archive"), manifest["app"])
+def _check_on_disk(out_dir: Path, manifest: dict[str, Any]) -> None:
+    """Fail closed unless every archive on disk still has the digest go-build recorded and checksums.txt lists."""
     checksums = out_dir / "checksums.txt"
     if not checksums.is_file():
         raise SignError(f"checksums.txt is missing from {out_dir}")
+    listed: dict[str, str] = {}
+    for line in checksums.read_text(encoding="utf-8").splitlines():
+        digest, _, name = line.partition("  ")
+        if name:
+            listed[name] = digest
+    for entry in manifest["artifacts"]:
+        if not isinstance(entry, dict) or entry.get("kind") not in ("archive", "checksums"):
+            continue
+        path = out_dir / entry["name"]
+        if not path.is_file():
+            raise SignError(f"{entry['name']} is missing from {out_dir}; run go-build again")
+        actual = _sha256(path)
+        if actual != entry.get("sha256"):
+            raise SignError(f"{entry['name']} changed since go-build (sha256 {actual[:12]}... on disk, manifest says {str(entry.get('sha256'))[:12]}...); run go-build again")
+        if entry["kind"] == "archive" and listed.get(entry["name"]) != actual:
+            raise SignError(f"checksums.txt does not list the sha256 of {entry['name']} that is on disk; run go-build again")
+
+
+def _sign_all(cosign: Cosign, pub: Path, out_dir: Path, manifest: dict[str, Any], req: dict[str, Any]) -> list[dict[str, Any]]:
+    version = manifest["version"]
+    binary = next((a["name"].split(f"_{version}_", 1)[0] for a in manifest["artifacts"] if isinstance(a, dict) and a.get("kind") == "archive"), manifest["app"])
+    _check_on_disk(out_dir, manifest)
+    checksums = out_dir / "checksums.txt"
     attestation = out_dir / f"{binary}_{version}.intoto.jsonl"
     statement_file = cosign.workdir / "statement.json"
     statement_file.write_text(json.dumps(statement(manifest, req), indent=2) + "\n", encoding="utf-8")

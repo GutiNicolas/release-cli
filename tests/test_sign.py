@@ -152,6 +152,26 @@ def test_a_remote_that_names_no_repository_is_refused_not_signed_empty(remote: A
         sign.statement(_ONE_ARCHIVE, {"remote_url": remote, "tag": TAG})
 
 
+@needs_cosign
+@pytest.mark.parametrize("tamper", ["archive", "checksums-line", "checksums-missing-line"])
+def test_files_changed_after_go_build_are_refused_and_nothing_is_signed(tamper: str, repo: Path, tmp_path: Path) -> None:
+    out = tmp_path / "out"
+    out.mkdir()
+    req = _build(repo, dry_run=True, out_dir=str(out))
+    victim = _archives(out)[0]
+    lines = (out / "checksums.txt").read_text().splitlines(keepends=True)
+    if tamper == "archive":
+        victim.write_bytes(victim.read_bytes() + b"x")
+    elif tamper == "checksums-line":
+        (out / "checksums.txt").write_text("".join(("0" * 64 + "  " + victim.name + "\n") if victim.name in ln else ln for ln in lines))
+    else:
+        (out / "checksums.txt").write_text("".join(ln for ln in lines if victim.name not in ln))
+    resp = sign.run(req)
+    assert resp["ok"] is False and (victim.name in resp["error"] or "checksums.txt" in resp["error"]), resp
+    assert not any((out / n).exists() for n in ("checksums.txt.sig", f"hello_{VERSION}.intoto.jsonl", "cosign.pub"))
+    assert not list(Path(os.environ["TMPDIR"]).glob("sign-*"))
+
+
 def _keypair(tmp_path: Path) -> tuple[str, str]:
     keys = tmp_path / "keys"
     keys.mkdir()
