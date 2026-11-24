@@ -183,3 +183,6 @@ Results: `github-release` adds `"assets": [names]`; `npm-publish` `{"name", "ver
 - 2026-11-24: phase 5 (T-10) dropped (user: no billing, CI runs locally with localci). GitHub attestations and npm
   `--provenance` need a GitHub Actions identity token, so they don't apply; releases keep the key-signed provenance
   from `sign`. go-apps is done.
+- 2026-11-24: fix found while launching localci: `homebrew-tap` committed the formula with no committer, so GitHub used
+  the token account's primary email (public on a public tap). Now it uses the released repo's git identity: #34
+  (3be6913), test-first, CI green; tool reinstalled.
