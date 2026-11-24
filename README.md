@@ -71,30 +71,52 @@ If any step up to the push fails (or you press Ctrl-C), your files, commits and 
 
 ## Install
 
-You need macOS or Linux, git, Python 3.11 or later, and [uv](https://docs.astral.sh/uv/).
+You need macOS or Linux and git. The build tools (`mvn`, `gradle` / `./gradlew`, `sbt`, `go`) are only needed by the hooks and connectors that call them.
+
+### Homebrew (macOS and Linux)
+
+```sh
+brew install GutiNicolas/tap/release-cli
+release --version
+```
+
+Homebrew brings its own Python. The built-in connectors work as they are; a connector installed from a URL (`release connector add <url>`) also needs [uv](https://docs.astral.sh/uv/): `brew install uv`.
+
+Update:
+
+```sh
+brew upgrade release-cli
+release update   # asks only the settings the new version adds
+```
+
+Uninstall:
+
+```sh
+brew uninstall release-cli
+brew untap GutiNicolas/tap
+```
+
+If you installed from a clone before, run `uv tool uninstall release-cli` first: otherwise the old `release` in `~/.local/bin` comes first in your `PATH`. Your settings and connectors are kept.
+
+### From a clone
+
+You need Python 3.11 or later and [uv](https://docs.astral.sh/uv/).
 
 ```sh
 curl -LsSf https://astral.sh/uv/install.sh | sh     # skip if you already have uv
 git clone https://github.com/GutiNicolas/release-cli.git
 cd release-cli
 ./install.sh
-```
-
-`install.sh` installs the `release` command with `uv tool install` and remembers where the clone is, so keep the clone. Check it worked:
-
-```sh
 release --version
 ```
 
-If your shell says `release: command not found`, add uv's bin folder to your `PATH` (in `~/.zshrc` or `~/.bashrc`) and open a new terminal:
+`install.sh` installs the `release` command with `uv tool install` and remembers where the clone is, so keep the clone. If your shell says `release: command not found`, add uv's bin folder to your `PATH` (in `~/.zshrc` or `~/.bashrc`) and open a new terminal:
 
 ```sh
 export PATH="$HOME/.local/bin:$PATH"
 ```
 
-The build tools (`mvn`, `gradle` / `./gradlew`, `sbt`, `go`) are only needed by the hooks and connectors that call them.
-
-### Update
+Update:
 
 ```sh
 release update              # pulls the clone and reinstalls, from any directory; prints old -> new version
@@ -103,14 +125,29 @@ release update --defaults   # takes the default of any new setting instead of as
 
 The clone must have no local changes. Your settings are kept: only a setting this version adds, or one whose meaning changed, is asked once. Built-in connectors update with the CLI. Connectors installed from a URL stay on their commit until `release connector update <name>`. A project's `.release` is never touched.
 
-### Uninstall
+Uninstall:
 
 ```sh
 uv tool uninstall release-cli
-rm -rf ~/.config/release ~/.local/share/release   # settings, connectors and saved runs
 ```
 
 Then delete the clone.
+
+### With uv, without a clone
+
+```sh
+uv tool install git+https://github.com/GutiNicolas/release-cli
+uv tool upgrade release-cli && release update   # update
+uv tool uninstall release-cli                   # uninstall
+```
+
+### Remove your settings
+
+Every channel keeps your settings, connectors and saved runs in the same place. To remove them too:
+
+```sh
+rm -rf ~/.config/release ~/.local/share/release
+```
 
 ## Quick start
 
@@ -309,8 +346,8 @@ release doctor --json       # the same as a JSON list of {name, status, message,
 
 Each line is `ok`, `warn` or `FAIL`, with what to do next. It checks:
 
-- **Tools:** `git`, `uv` (connectors and `release update`), and `gh` plus `gh auth status` when `github-release` is installed.
-- **Install:** the clone `release update` uses, and the installed version against the clone's.
+- **Tools:** `git`, `uv` (connectors installed from a URL, and `release update` from a clone), and `gh` plus `gh auth status` when `github-release` is installed.
+- **Install:** how release-cli was installed (Homebrew, uv or a clone); for a clone, the clone `release update` uses and the installed version against the clone's.
 - **Global config:** `connectors.toml`, `release.toml` and `source.toml` parse, and every installed connector loads (doctor does not run it).
 - **Project** (when `.release` or `release.toml` is in the current folder): the config parses, the version can be read, the folder is a git repo on a branch, `origin` is reachable and the branch is not behind it (doctor never fetches), and the project's connector settings name installed connectors.
 
