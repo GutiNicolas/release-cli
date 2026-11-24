@@ -123,7 +123,8 @@ Results: `github-release` adds `"assets": [names]`; `npm-publish` `{"name", "ver
 ### Phase 4: first consumer
 | Task | Repo | Depends on | Status | PR | Note |
 |---|---|---|---|---|---|
-| [T-09](tasks/T-09.md) localci releases with release-cli (acceptance) | localci | P3, localci's T-22 | todo | | ships as localci's T-22 (its plan, its worker, base `release/localci-p4`); no separate worker. Done when T-22 merges with these criteria met |
+| [T-11](tasks/T-11.md) `sign`: configurable provenance builder id | release-cli | P3 | todo | | localci's T-22 needs it: its public provenance must not name the tool |
+| [T-09](tasks/T-09.md) localci releases with release-cli (acceptance) | localci | T-11, localci's T-22 | todo | | ships as localci's T-22 (its plan, its worker, base `release/localci-p4`); no separate worker. Done when T-22 merges with these criteria met |
 
 ### Phase 5: CI-identity provenance (when GitHub Actions has quota; after launch)
 | Task | Repo | Depends on | Status | PR | Note |
@@ -136,6 +137,7 @@ Results: `github-release` adds `"assets": [names]`; `npm-publish` `{"name", "ver
 - localci's T-22 (planned on GoReleaser) is rewritten to consume this after approval — localci's planning session.
 - localci's plan asks for a configurable provenance builder id before its T-22 (the `sign` statement names
   release-cli as the builder today), and treats the tool's name as private although this repo is public — user.
+  The builder id part is now T-11; the naming mismatch stays open.
 
 ## Log
 - 2026-11-22: plan written (feature intake). Build and publish as connectors per the user. Not yet approved.
@@ -149,3 +151,6 @@ Results: `github-release` adds `"assets": [names]`; `npm-publish` `{"name", "ver
 - 2026-11-23: dispatch found T-09 not ready: localci's T-22 does the same work in the same files, waits on localci's
   T-21 and wave 1, and `release/localci-p4` is not cut. The user linked them: T-09 ships through T-22, no
   separate worker; `integrate` here marks T-09 once T-22 is integrated in localci.
+- 2026-11-24: T-11 added to phase 4 (autonomous run the user asked for): localci's T-22 contract needs the `sign`
+  provenance to carry a configurable builder id, and today `builder.id`, `builder.version` and `buildType` all name
+  the tool. T-09 now also waits on T-11.
