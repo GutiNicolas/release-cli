@@ -186,3 +186,6 @@ Results: `github-release` adds `"assets": [names]`; `npm-publish` `{"name", "ver
 - 2026-11-24: fix found while launching localci: `homebrew-tap` committed the formula with no committer, so GitHub used
   the token account's primary email (public on a public tap). Now it uses the released repo's git identity: #34
   (3be6913), test-first, CI green; tool reinstalled.
+- 2026-11-24: the tool's own commits use the `[release-cli]` prefix (user's request): #35 (4228ae4); release notes
+  still drop the older `[manual-release]` commits. Tool reinstalled. localci's `v0.1.0` (cut before) has
+  `[manual-release]` commits; its next release would name the tool in its public history (open question for the user).
