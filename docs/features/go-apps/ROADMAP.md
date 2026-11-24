@@ -42,7 +42,7 @@ under `packages/playwright`); the design stays generic for any Go app.
   local run lacks (*to verify in T-08*). So phase 3 signs with a maintainer key: a `sign` connector (cosign, key-based,
   no identity published) signs `checksums.txt` and attaches an in-toto SLSA provenance statement for every
   archive. It runs in the same chain, on a laptop or in the local CI. The npm package ships without provenance at
-  launch. CI-identity provenance (attestations, npm provenance) is phase 5, once Actions has quota.
+  launch. CI-identity provenance (attestations, npm provenance) was phase 5, dropped: CI stays local.
 - **`go install` path:** ldflags do not apply, so the binary reads its version from `runtime/debug.ReadBuildInfo`
   when the stamped one is `dev` (app-side, in localci's adoption task).
 - **Public repo:** plan, code, tests and fixtures name no private company, repo, host or path; fixtures use `acme/*`.
@@ -129,17 +129,17 @@ Results: `github-release` adds `"assets": [names]`; `npm-publish` `{"name", "ver
 | [T-12](tasks/T-12.md) `npm-publish` builds the package from the release commit | release-cli | T-11 | merged | [#32](https://github.com/GutiNicolas/release-cli/pull/32) | localci's T-22 dry-run: `prepack` (`tsc`) fails in the archive |
 | [T-09](tasks/T-09.md) localci releases with release-cli (acceptance) | localci | T-11, T-12, localci's T-22 | merged | localci #46 (merged in its #45) | ships as localci's T-22 (its plan, its worker, base `release/localci-p4`); no separate worker. Done when T-22 merges with these criteria met |
 
-### Phase 5: CI-identity provenance (when GitHub Actions has quota; after launch)
+### Phase 5: CI-identity provenance (dropped 2026-11-24: CI is local, no GitHub Actions)
 | Task | Repo | Depends on | Status | PR | Note |
 |---|---|---|---|---|---|
-| [T-10](tasks/T-10.md) `gh-workflow` connector, GitHub attestations, npm provenance | release-cli | P4 | todo | | not before Actions quota |
+| [T-10](tasks/T-10.md) `gh-workflow` connector, GitHub attestations, npm provenance | release-cli | P4 | dropped | | CI runs locally (localci); GitHub identity provenance needs Actions. Key-signed provenance (T-08) is the provenance |
 
 ## Handoff (2026-11-24)
 - **Published:** phases 1 to 3; phase 4's T-11 (#31) and T-12 (#33). localci's phase 4 (its T-22 = T-09 here) is on
   localci's main: its dry-run builds, signs (throwaway key) and packs every file a launch needs.
 - **In flight:** nothing. Phase 4 is done: T-09 `merged` (the maintainer's key is in the Keychain, `cosign.pub` on
   localci's main). Its first signed release runs in localci's launch task (T-34).
-- **Next steps:** phase 5 (T-10) waits on GitHub Actions quota. Open lows: see the Log (phases 2 and 3, and `builder_id` with a query).
+- **Next steps:** none: the feature is done (phase 5 dropped, CI stays local). Open lows: see the Log (phases 2 and 3, and `builder_id` with a query).
 
 ## Open questions
 - Where the private signing key lives for the local CI (keychain on the maintainer's machine, or a local CI secret) — user, in T-09.
@@ -180,3 +180,6 @@ Results: `github-release` adds `"assets": [names]`; `npm-publish` `{"name", "ver
   (`cosign-key`, `cosign-password`), `cosign.pub` committed to localci's main (1c134fe). Checked: the Keychain key signs
   a blob the way `sign` does (signing config, bundle) and it verifies with the committed `cosign.pub`. localci's
   CONTRIBUTING verify command was wrong for bundles (`--signature` fails); fixed in the same commit. T-09 `merged`.
+- 2026-11-24: phase 5 (T-10) dropped (user: no billing, CI runs locally with localci). GitHub attestations and npm
+  `--provenance` need a GitHub Actions identity token, so they don't apply; releases keep the key-signed provenance
+  from `sign`. go-apps is done.
