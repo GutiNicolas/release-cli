@@ -57,7 +57,7 @@ One phase, one PR in this repo plus the tap repo.
 | --- | --- |
 | Detection in `update.py` / `doctor.py`, tests | done (PR) |
 | Formula draft, local-tap install on macOS | done |
-| Linux (`homebrew/brew` container) | see PR |
+| Linux (`homebrew/brew` container), same checks | done |
 | README Install section | done (PR) |
 | Tag `v0.4.0` on the public repo | waiting for the user's go-ahead |
 | Tap repo `GutiNicolas/homebrew-tap` with `Formula/release-cli.rb` | waiting for the user's go-ahead |
@@ -67,4 +67,4 @@ One phase, one PR in this repo plus the tap repo.
 
 ## Log
 - 2026-11-24: plan written and built in one session; brew install, `release update` and `release doctor` checked on
-  macOS from a local tap pointing at a tarball of the branch.
+  macOS and in a `homebrew/brew` Linux container, from a local tap pointing at a tarball of the branch.
