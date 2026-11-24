@@ -287,14 +287,15 @@ def _installed_version() -> str | None:
         return None
 
 
-def update(*, defaults: bool, log: Callable[[str], None] = print) -> None:
+def update(*, defaults: bool, log: Callable[[str], None] = print) -> list[str]:
+    """Returns the config keys this process asked (none when the new binary asked them)."""
     channel = managed_channel()
     if channel is not None:
         log(f"release-cli {_installed_version() or '?'} was installed with {channel.name}; upgrade it with: {channel.upgrade}")
         log("this command only asks the settings a new version adds, so run it again after upgrading")
         asked = ensure_config(defaults=defaults, log=log)
         log(f"config saved: {', '.join(asked)}" if asked else "config: nothing new to ask")
-        return
+        return asked
     src = find_source()
     if src is None:
         raise UpdateError(
@@ -321,17 +322,19 @@ def update(*, defaults: bool, log: Callable[[str], None] = print) -> None:
     register_source(src.path)
     # The running process is the old code; the new binary knows the new config keys.
     fresh = shutil.which("release")
+    asked: list[str] = []
     if fresh:
         cmd = [fresh, "update", "--config-only", *(["--defaults"] if defaults else [])]
         if subprocess.run(cmd, check=False).returncode != 0:
             raise UpdateError("the new release installed, but asking the new config keys failed; run `release update --config-only`")
     else:
-        ensure_config(defaults=defaults, log=log)
+        asked = ensure_config(defaults=defaults, log=log)
     log(f"release-cli {old_version} ({old_sha}) -> {_pyproject_version(src.path)} ({new_sha})")
     if old_sha == new_sha:
         log("already up to date; reinstalled")
     for line in connector_notes():
         log(line)
+    return asked
 
 
 def connector_notes() -> list[str]:

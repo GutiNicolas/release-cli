@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import io
 import json
 import os
 import subprocess
@@ -269,3 +270,14 @@ def test_doctor_install_check_passes_under_homebrew_without_a_clone(env: dict[st
     monkeypatch.setattr(sys, "prefix", str(env["tmp"] / "linuxbrew" / "Cellar" / "release-cli" / "0.4.0" / "libexec"))
     (check,) = [c for c in doctor.check_install(None) if c.name == "install"]
     assert check.status == doctor.OK and "Homebrew" in check.message
+
+
+def test_enabling_cursor_review_through_update_under_homebrew_installs_its_connector(
+    env: dict[str, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # No install.sh under brew: the first `release update` is where cursor-review is offered.
+    monkeypatch.setattr(sys, "prefix", str(env["tmp"] / "homebrew" / "Cellar" / "release-cli" / "0.4.0" / "libexec"))
+    monkeypatch.setattr(sys, "stdin", io.StringIO("y\n\n\n"))
+    main(["update"])
+    assert connectors.load_release_toml()["cursor-review"]["notify"] is True
+    assert "cursor-review" in connectors.load_global()["connectors"]

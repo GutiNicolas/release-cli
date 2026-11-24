@@ -34,6 +34,9 @@ repo or installing uv first. `release update` and `release doctor` understand th
   pointing at a directory is still the clone install.
 - **Under a package manager, `release update` prints the upgrade command, asks the new config keys, exits 0.** It
   never touches git or uv. Running it after `brew upgrade` is how new settings get asked (no install hook in brew).
+  `uv tool upgrade` was checked to move a git install to the newer commit.
+- **A yes to cursor-review in `release update` also installs its connector**, as `install.sh` does; brew and uv
+  installs never run `install.sh`, so their first `release update` is where cursor-review is offered.
 - **uv isn't a brew dependency.** Only connectors installed from a URL need it; the built-in connectors don't. The
   error from `release connector add <url>` and doctor's uv check say `brew install uv` under brew.
 - **Versions are tagged by hand for now.** release-cli has no Python/pyproject adapter; adding one (PEP 440 versions,

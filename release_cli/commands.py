@@ -209,8 +209,17 @@ def update_command(ns: argparse.Namespace) -> None:
     elif ns.config_only:
         asked = update.ensure_config(defaults=ns.defaults, log=info)
         info(f"config saved: {', '.join(asked)}" if asked else "config: nothing new to ask")
+        _add_cursor_review_if_just_enabled(asked)
     else:
-        update.update(defaults=ns.defaults, log=info)
+        _add_cursor_review_if_just_enabled(update.update(defaults=ns.defaults, log=info))
+
+
+def _add_cursor_review_if_just_enabled(asked: list[str]) -> None:
+    """Homebrew and uv installs never run install.sh, so a yes to cursor-review here also installs its connector."""
+    if "cursor-review.notify" not in asked or cx.load_release_toml().get("cursor-review", {}).get("notify") is not True:
+        return
+    if "cursor-review" not in cx.load_global()["connectors"]:
+        connector_add("cursor-review", defaults=True)
 
 
 def after_install(root: Path, *, defaults: bool, ask: prompts.Ask = input) -> None:
