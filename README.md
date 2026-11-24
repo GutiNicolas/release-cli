@@ -171,6 +171,7 @@ release connector add go-build                                                  
 release connector add homebrew-tap                                                          # built in
 release connector add jira                                                                  # built in
 release connector add npm-publish                                                           # built in
+release connector add sign                                                                  # built in
 release connector add slack-notify                                                          # built in
 release connector ls        # order, enabled, break_on_error, installed commit SHA
 release connector update platform-build     # explicit; only a connector installed from a URL
@@ -232,7 +233,7 @@ Settings: `release edit` then `global set cursor-review <key> <value>` for `dela
 
 Optional, built in: `release connector add github-release`. After the push it creates the GitHub Release of the tag with the [GitHub CLI](https://cli.github.com/) (`gh`, installed and logged in with `gh auth login`). Release candidates are marked as pre-releases. The notes are the commits since the previous tag (for a final, since the previous final), without the CLI's own `[manual-release]` commits; `release notes <tag>` prints the same text. It asks once per release (default yes), skips repositories whose `origin` is not on github.com, and on a resume reuses a release that already exists instead of creating a second one.
 
-When `go-build` ran before it in the chain (it must come first in the order), the release also gets the build's files: the archives, `checksums.txt` and the installer, so people can download and verify them. (The Homebrew formula is not a release asset: it is committed to your tap repository by `homebrew-tap`, which runs after.) The npm package is not uploaded. Each file is one `gh release upload --clobber`; on a resume the release is reused and only the files that are missing (or whose content differs: each file is compared by its sha256, never by size) are uploaded again. Without `go-build` nothing changes. `release --dry-run` calls no `gh`: it prints the assets it would upload.
+When `go-build` ran before it in the chain (it must come first in the order), the release also gets the build's files: the archives, `checksums.txt` and the installer, so people can download and verify them; when [`sign`](#sign) ran, also the signature, the provenance and the public key it added. (The Homebrew formula is not a release asset: it is committed to your tap repository by `homebrew-tap`, which runs after.) The npm package is not uploaded. Each file is one `gh release upload --clobber`; on a resume the release is reused and only the files that are missing (or whose content differs: each file is compared by its sha256, never by size) are uploaded again. Without `go-build` nothing changes. `release --dry-run` calls no `gh`: it prints the assets it would upload.
 
 ### go-build
 
@@ -286,6 +287,50 @@ desc = "Hello command line tool"       # optional; the formula's description
 ```
 
 Store the token once with `release secret set homebrew-tap-token`; the [GitHub CLI](https://cli.github.com/) (`gh`) must be on `PATH`. `release --dry-run` renders the formula into the dry-run folder (`<binary>.rb`) and commits nothing.
+
+### sign
+
+Optional, built in: `release connector add sign`, placed after `go-build` and before `github-release` in the chain. It signs the release with a key you hold, on a laptop or in a local CI, with no hosted CI and no identity published: it needs [`cosign`](https://docs.sigstore.dev/cosign/system_config/installation/) 3.x on `PATH` (`brew install cosign`) and sends nothing to a transparency log.
+
+It adds three files next to the build, and `github-release` uploads them:
+
+| File | What it is |
+|---|---|
+| `checksums.txt.sig` | cosign signature bundle of `checksums.txt` (which lists the sha256 of every archive) |
+| `<binary>_<version>.intoto.jsonl` | signed in-toto statement with SLSA provenance (v1): every archive and its sha256, the tag, the commit, the repository, the build flags, and release-cli and its version as the builder |
+| `cosign.pub` | the public key, also committed in your repo |
+
+```toml
+# .release
+[connectors.sign]
+public_key = "cosign.pub"              # default; committed in the app repo, the pair of the private key below
+# key_secret = "cosign-key"            # default secret names
+# password_secret = "cosign-password"
+```
+
+Set it up once:
+
+```sh
+cosign generate-key-pair                       # asks for a password; writes cosign.key (private, keep it out of the repo) and cosign.pub
+git add cosign.pub && git commit -m "Add the release public key"
+base64 < cosign.key | tr -d '\n'               # copy this one line
+release secret set cosign-key                  # paste it
+release secret set cosign-password             # the password you chose
+```
+
+`cosign-key` holds the key file's content (or its base64, as above, because `release secret set` reads one line). In a local CI set `RELEASE_SECRET_COSIGN_KEY` and `RELEASE_SECRET_COSIGN_PASSWORD` instead. The key is written to a private temporary file only while cosign runs, then deleted, and it is never printed or kept in the run state. After signing, `sign` checks its own output with `cosign.pub`, so a public key that is not the pair of the private key fails the release step instead of shipping files nobody can verify. A missing `cosign` or secret fails with the command that fixes it. The repository named in the provenance is the `origin` remote as an `https://` URL (SSH remotes are converted); if no repository can be derived from it, `sign` fails instead of signing an empty source. Before signing, every archive is hashed again and compared with `go-build`'s manifest and `checksums.txt`: if a file changed since `go-build`, `sign` fails naming it and signs nothing (run `go-build` again). `release --dry-run` signs with a throwaway key generated in the dry-run folder, so the whole chain is checked without the real key.
+
+**Verify a release** (anyone, with the files from the GitHub Release and `cosign.pub`):
+
+```sh
+# the checksums are the maintainer's
+cosign verify-blob --key cosign.pub --insecure-ignore-tlog --bundle checksums.txt.sig checksums.txt
+# the archive is the one built from the tagged commit (repeat for each archive you use)
+cosign verify-blob-attestation --key cosign.pub --insecure-ignore-tlog --type slsaprovenance1 \
+  --bundle hello_1.2.3.intoto.jsonl hello_1.2.3_linux_amd64.tar.gz
+```
+
+The signature covers `checksums.txt` and the attestation covers each archive's own sha256, so both commands pass only for files that were not changed. `--insecure-ignore-tlog` is required because nothing is in a transparency log: the signature and the key are still checked. The statement is base64 JSON in `dsseEnvelope.payload` and names the tag, the commit and every archive's sha256. npm provenance and GitHub attestations need a hosted CI's identity token, so they are not part of this connector.
 
 ### jira
 

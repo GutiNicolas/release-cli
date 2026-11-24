@@ -209,6 +209,27 @@ def test_run_uploads_every_manifest_asset_but_the_npm_tgz_and_resume_sends_only_
     assert resumed.result["uploaded"] == ["install.sh"]
 
 
+def _sign_prior(tmp_path: Path, status: str = "ok") -> dict:
+    out = tmp_path / "dist"
+    files = []
+    for name, kind in [("checksums.txt.sig", "signature"), ("app_1.0.0.intoto.jsonl", "provenance"), ("cosign.pub", "publickey")]:
+        (out / name).write_bytes(name.encode())
+        files.append({"name": name, "kind": kind, "sha256": "x", "size": len(name)})
+    return {"sign": {"status": status, "result": {"signed": ["checksums.txt"], "public_key": "cosign.pub", "tlog": False, "artifacts": files}, "error": None, "job_id": None}}
+
+
+def test_run_uploads_the_signature_provenance_and_public_key_that_sign_added(repo: Path, fake_gh: Path, tmp_path: Path) -> None:
+    prior = _manifest_prior(tmp_path)
+    signed = ["checksums.txt.sig", "app_1.0.0.intoto.jsonl", "cosign.pub"]
+    out = parse_run(gr.run({**_req(repo, "1.0.0-rc1"), "prior": {**prior, **_sign_prior(tmp_path)}}))
+    assert out.status == "ok" and out.result["assets"][-3:] == signed
+    assert _uploads(fake_gh)[-3:] == signed
+    # a failed sign must not put its (possibly partial) files on the release
+    fake_gh.unlink()
+    out = parse_run(gr.run({**_req(repo, "1.0.0-rc1"), "prior": {**prior, **_sign_prior(tmp_path, "failed")}}))
+    assert out.status == "ok" and not set(signed) & set(out.result["assets"]) and not set(signed) & set(_uploads(fake_gh))
+
+
 def test_run_reuploads_an_asset_whose_content_differs_even_at_the_same_size(repo: Path, fake_gh: Path, tmp_path: Path) -> None:
     req = {**_req(repo, "1.0.0-rc1"), "prior": _manifest_prior(tmp_path)}
     assert gr.run(req)["ok"]
