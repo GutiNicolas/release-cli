@@ -125,7 +125,8 @@ Results: `github-release` adds `"assets": [names]`; `npm-publish` `{"name", "ver
 | Task | Repo | Depends on | Status | PR | Note |
 |---|---|---|---|---|---|
 | [T-11](tasks/T-11.md) `sign`: configurable provenance builder id | release-cli | P3 | merged | [#30](https://github.com/GutiNicolas/release-cli/pull/30) | localci's T-22 needs it: its public provenance must not name the tool |
-| [T-09](tasks/T-09.md) localci releases with release-cli (acceptance) | localci | T-11, localci's T-22 | todo | | ships as localci's T-22 (its plan, its worker, base `release/localci-p4`); no separate worker. Done when T-22 merges with these criteria met |
+| [T-12](tasks/T-12.md) `npm-publish` builds the package from the release commit | release-cli | T-11 | in progress | | localci's T-22 dry-run: `prepack` (`tsc`) fails in the archive |
+| [T-09](tasks/T-09.md) localci releases with release-cli (acceptance) | localci | T-11, T-12, localci's T-22 | todo | | ships as localci's T-22 (its plan, its worker, base `release/localci-p4`); no separate worker. Done when T-22 merges with these criteria met |
 
 ### Phase 5: CI-identity provenance (when GitHub Actions has quota; after launch)
 | Task | Repo | Depends on | Status | PR | Note |
@@ -158,3 +159,7 @@ Results: `github-release` adds `"assets": [names]`; `npm-publish` `{"name", "ver
 - 2026-11-24: T-11 merged to main (#31, merge commit bf2c296): `[connectors.sign] builder_id`. Reviewed in the release
   session, no fix before merge; one low open (query or fragment in `builder_id`). `release/go-apps-p4` deleted. T-09
   waits on localci's T-22 (which needs the maintainer's cosign key pair).
+- 2026-11-24: T-12 added to phase 4 and dispatched: localci's T-22 dry-run showed `npm-publish` cannot pack a
+  TypeScript workspace package (the `git archive` of `package_dir` has no `node_modules`; `prepack` fails). Still from
+  the release commit: whole-commit archive plus `npm ci` when there is a lockfile. Also seen: the installed tool was
+  stale (rejected `tool = "go"`); reinstall it from main after this release.
