@@ -123,7 +123,7 @@ Results: `github-release` adds `"assets": [names]`; `npm-publish` `{"name", "ver
 ### Phase 4: first consumer
 | Task | Repo | Depends on | Status | PR | Note |
 |---|---|---|---|---|---|
-| [T-11](tasks/T-11.md) `sign`: configurable provenance builder id | release-cli | P3 | in progress | | localci's T-22 needs it: its public provenance must not name the tool |
+| [T-11](tasks/T-11.md) `sign`: configurable provenance builder id | release-cli | P3 | integrated | [#30](https://github.com/GutiNicolas/release-cli/pull/30) | localci's T-22 needs it: its public provenance must not name the tool |
 | [T-09](tasks/T-09.md) localci releases with release-cli (acceptance) | localci | T-11, localci's T-22 | todo | | ships as localci's T-22 (its plan, its worker, base `release/localci-p4`); no separate worker. Done when T-22 merges with these criteria met |
 
 ### Phase 5: CI-identity provenance (when GitHub Actions has quota; after launch)
