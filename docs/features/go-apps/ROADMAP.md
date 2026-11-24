@@ -189,3 +189,4 @@ Results: `github-release` adds `"assets": [names]`; `npm-publish` `{"name", "ver
 - 2026-11-24: the tool's own commits use the `[release-cli]` prefix (user's request): #35 (4228ae4); release notes
   still drop the older `[manual-release]` commits. Tool reinstalled. localci's `v0.1.0` (cut before) has
   `[manual-release]` commits; its next release would name the tool in its public history (open question for the user).
+- 2026-11-24: the user confirmed T-10 stays dropped (no local equivalent wanted). go-apps is closed: phases 1 to 4 merged, phase 5 dropped.
