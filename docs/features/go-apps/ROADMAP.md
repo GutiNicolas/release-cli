@@ -127,7 +127,7 @@ Results: `github-release` adds `"assets": [names]`; `npm-publish` `{"name", "ver
 |---|---|---|---|---|---|
 | [T-11](tasks/T-11.md) `sign`: configurable provenance builder id | release-cli | P3 | merged | [#30](https://github.com/GutiNicolas/release-cli/pull/30) | localci's T-22 needs it: its public provenance must not name the tool |
 | [T-12](tasks/T-12.md) `npm-publish` builds the package from the release commit | release-cli | T-11 | merged | [#32](https://github.com/GutiNicolas/release-cli/pull/32) | localci's T-22 dry-run: `prepack` (`tsc`) fails in the archive |
-| [T-09](tasks/T-09.md) localci releases with release-cli (acceptance) | localci | T-11, T-12, localci's T-22 | todo | | ships as localci's T-22 (its plan, its worker, base `release/localci-p4`); no separate worker. Done when T-22 merges with these criteria met |
+| [T-09](tasks/T-09.md) localci releases with release-cli (acceptance) | localci | T-11, T-12, localci's T-22 | blocked | localci #46 (merged in its #45) | ships as localci's T-22 (its plan, its worker, base `release/localci-p4`); no separate worker. Done when T-22 merges with these criteria met |
 
 ### Phase 5: CI-identity provenance (when GitHub Actions has quota; after launch)
 | Task | Repo | Depends on | Status | PR | Note |
@@ -135,16 +135,12 @@ Results: `github-release` adds `"assets": [names]`; `npm-publish` `{"name", "ver
 | [T-10](tasks/T-10.md) `gh-workflow` connector, GitHub attestations, npm provenance | release-cli | P4 | todo | | not before Actions quota |
 
 ## Handoff (2026-11-24)
-- **Published:** phases 1 to 3; phase 4's T-11 (#31, `builder_id`).
-- **In flight:** T-12 (`npm-publish` builds from the release commit) on `release/go-apps-p4`, worker PR pending.
-  localci's T-22 (= T-09 here) is blocked on it (draft PR in localci).
-- **Next steps:** integrate T-12, review it, merge `release/go-apps-p4` to main with a merge commit, then reinstall the
-  tool (`uv tool install --force ~/projects/release-cli`) so localci's T-22 can re-run its dry-run. T-09 closes when
-  localci's T-22 merges. Phase 5 (T-10) waits on GitHub Actions quota.
-  Prompt for a fresh session in `~/projects/release-cli`:
-  ```
-  /gutix:ship integrate docs/features/go-apps — read the Handoff section; integrate and release T-12, then reinstall the tool.
-  ```
+- **Published:** phases 1 to 3; phase 4's T-11 (#31) and T-12 (#33). localci's phase 4 (its T-22 = T-09 here) is on
+  localci's main: its dry-run builds, signs (throwaway key) and packs every file a launch needs.
+- **In flight:** nothing. T-09 is `blocked` on the user only: its real-key criteria (sign with the maintainer's key,
+  verify with the committed `cosign.pub`) wait for the key pair, generated before localci's launch.
+- **Next steps:** when localci's `cosign.pub` is committed and one dry-run verifies against it, set T-09 to `merged`.
+  Phase 5 (T-10) waits on GitHub Actions quota. Open lows: see the Log (phases 2 and 3, and `builder_id` with a query).
 
 ## Open questions
 - Where the private signing key lives for the local CI (keychain on the maintainer's machine, or a local CI secret) — user, in T-09.
@@ -179,3 +175,5 @@ Results: `github-release` adds `"assets": [names]`; `npm-publish` `{"name", "ver
 - 2026-11-24: T-12 merged to main (#33, merge commit 3fe21f8) with one review fix (`fix(T-12)`: `npm ci --ignore-scripts`
   without the token, and no `RELEASE_SECRET_*` for `npm ci`/`npm pack`). #33 was merged before its own checks finished;
   the same code was green on #32 and main's run was checked afterwards. Tool reinstalled from main for localci's T-22.
+- 2026-11-24: localci's T-22 merged (its #45). T-09 set to `blocked`: everything but the real-key criteria passed on
+  dry-runs; those need the maintainer's key pair (before localci's launch).
