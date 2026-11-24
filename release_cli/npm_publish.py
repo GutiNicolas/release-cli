@@ -1,6 +1,7 @@
 """Built-in connector `npm-publish`: publish the app's npm package with the same version as the binary.
 
-The package folder (`package_dir`) is extracted from the release commit (`git archive`) into a temp dir, its `version` is set there (the tracked `package.json`
+The whole release commit is extracted (`git archive`) into a temp dir, `npm ci` runs there where the lockfile is (the root, else `package_dir`; none: no install)
+so a `prepack` build works, the `version` of `package_dir/package.json` is set in that copy (the tracked file
 is never edited), `npm pack` writes the tarball into the `go-build` output folder and `npm publish <tarball>` uploads
 it. RCs go under the dist-tag `rc_dist_tag` (default `next`), finals under `latest`. Dry run: `npm publish --dry-run`.
 A version that is already on the registry is a success with `published: false`, so a resumed run does not fail.
@@ -14,8 +15,8 @@ logged; without that secret npm uses the user's own `npm login`.
 from __future__ import annotations
 
 import hashlib
-import io
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -81,9 +82,16 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _npm(args: list[str], cwd: Path, token: str | None) -> subprocess.CompletedProcess[str]:
+def _without_secrets() -> dict[str, str]:
+    """The environment minus `RELEASE_SECRET_*`: for npm steps that run code from dependencies (`npm ci`, `prepack`)."""
+    return {k: v for k, v in os.environ.items() if not k.startswith("RELEASE_SECRET_")}
+
+
+def _npm(args: list[str], cwd: Path, token: str | None, *, untrusted: bool = False) -> subprocess.CompletedProcess[str]:
+    """`untrusted`: the command runs dependency code, so it gets no `RELEASE_SECRET_*` variables."""
     try:
-        proc = subprocess.run(["npm", *args], cwd=cwd, capture_output=True, text=True, timeout=TIMEOUT, check=False)
+        proc = subprocess.run(["npm", *args], cwd=cwd, capture_output=True, text=True, timeout=TIMEOUT, check=False,
+                              env=_without_secrets() if untrusted else None)
     except subprocess.TimeoutExpired as exc:
         raise PublishError(f"`npm {args[0]}` timed out after {TIMEOUT} s") from exc
     except OSError as exc:
@@ -106,19 +114,24 @@ def _token(settings: dict[str, Any]) -> str | None:
     return value
 
 
-def _prepare(root: Path, settings: dict[str, Any], version: str, tmp: Path, sha: str) -> Path:
-    """Extract `package_dir` as committed at `sha`: untracked and uncommitted files never reach `npm pack`."""
+def _prepare(root: Path, settings: dict[str, Any], version: str, tmp: Path, sha: str) -> tuple[Path, Path]:
+    """Extract the whole commit at `sha` (the package may build from workspace siblings and a root lockfile).
+
+    Untracked and uncommitted files never reach `npm pack`. Returns the extracted root and the package folder in it.
+    """
     src = (root / settings["package_dir"]).resolve()
     if root.resolve() != src and root.resolve() not in src.parents:
         raise PublishError(f"no package.json in {settings['package_dir']!r} (package_dir is relative to the repo root)")
     rel = src.relative_to(root.resolve()).as_posix()
-    archive = subprocess.run(["git", "archive", "--format=tar", sha, "--", rel], cwd=root, capture_output=True, check=False)
-    if archive.returncode != 0:
-        raise PublishError(f"could not read {settings['package_dir']!r} from commit {sha}: {_tail(archive.stderr.decode(errors='replace'), None)}")
     extracted = tmp / "tree"
     extracted.mkdir()
-    with tarfile.open(fileobj=io.BytesIO(archive.stdout)) as tar:
+    archive_file = tmp / "commit.tar"
+    archive = subprocess.run(["git", "archive", "--format=tar", "-o", str(archive_file), sha], cwd=root, capture_output=True, check=False)
+    if archive.returncode != 0:
+        raise PublishError(f"could not read commit {sha}: {_tail(archive.stderr.decode(errors='replace'), None)}")
+    with tarfile.open(archive_file) as tar:
         tar.extractall(extracted, filter="data")
+    archive_file.unlink()
     copy = extracted / rel
     if not (copy / "package.json").is_file():
         raise PublishError(f"no package.json in {settings['package_dir']!r} at commit {sha[:12]} (is it committed? package_dir is relative to the repo root)")
@@ -131,7 +144,18 @@ def _prepare(root: Path, settings: dict[str, Any], version: str, tmp: Path, sha:
         raise PublishError(f"{settings['package_dir']}/package.json has no `name`")
     pkg["version"] = version  # only the copy changes; the tracked file keeps its own version
     pkg_file.write_text(json.dumps(pkg, indent=2) + "\n", encoding="utf-8")
-    return copy
+    return extracted, copy
+
+
+def _install(extracted: Path, pkg: Path, token: str | None) -> None:
+    """`npm ci` where the lockfile is (the root first, so workspaces get their dev dependencies); no lockfile, no install."""
+    folder = extracted if (extracted / "package-lock.json").is_file() else pkg if (pkg / "package-lock.json").is_file() else None
+    if folder is None:
+        return
+    # no token and no install scripts: a dependency's install script must not be able to read the publish token
+    installed = _npm(["ci", "--ignore-scripts"], folder, token, untrusted=True)
+    if installed.returncode != 0:
+        raise PublishError(f"npm ci failed in {folder} (a copy of the release commit): {_tail(installed.stderr or installed.stdout, token)}")
 
 
 def _published(name: str, version: str, registry: str, cwd: Path, token: str | None, userconfig: Path | None) -> bool:
@@ -163,7 +187,7 @@ def _publish(req: dict[str, Any], settings: dict[str, Any], dest: Path) -> dict[
     token = _token(settings)
     with tempfile.TemporaryDirectory(prefix="npm-publish-") as tmpdir:
         tmp = Path(tmpdir)
-        pkg = _prepare(Path(req["repo_root"]), settings, version, tmp, req.get("sha") or "HEAD")
+        extracted, pkg = _prepare(Path(req["repo_root"]), settings, version, tmp, req.get("sha") or "HEAD")
         name = json.loads((pkg / "package.json").read_text(encoding="utf-8"))["name"]
         userconfig: Path | None = None
         if token:
@@ -177,9 +201,10 @@ def _publish(req: dict[str, Any], settings: dict[str, Any], dest: Path) -> dict[
             print(f"npm-publish: {name}@{version} is already on the registry; nothing to publish", file=sys.stderr)
             return result
         dest.mkdir(parents=True, exist_ok=True)
-        packed = _npm(["pack", str(pkg), "--pack-destination", str(dest), "--json"], tmp, token)
+        _install(extracted, pkg, token)
+        packed = _npm(["pack", str(pkg), "--pack-destination", str(dest), "--json"], tmp, token, untrusted=True)
         if packed.returncode != 0:
-            raise PublishError(f"npm pack failed: {_tail(packed.stderr or packed.stdout, token)}")
+            raise PublishError(f"npm pack failed in {pkg} (it runs the package's `prepack`): {_tail(packed.stderr or packed.stdout, token)}")
         try:
             tgz = dest / json.loads(packed.stdout)[0]["filename"]
         except (ValueError, LookupError, TypeError) as exc:
