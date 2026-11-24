@@ -123,7 +123,7 @@ Results: `github-release` adds `"assets": [names]`; `npm-publish` `{"name", "ver
 ### Phase 4: first consumer
 | Task | Repo | Depends on | Status | PR | Note |
 |---|---|---|---|---|---|
-| [T-09](tasks/T-09.md) localci releases with release-cli (acceptance) | localci | P3 | todo | | replaces the build part of localci's T-22 |
+| [T-09](tasks/T-09.md) localci releases with release-cli (acceptance) | localci | P3, localci's T-22 | todo | | ships as localci's T-22 (its plan, its worker, base `release/localci-p4`); no separate worker. Done when T-22 merges with these criteria met |
 
 ### Phase 5: CI-identity provenance (when GitHub Actions has quota; after launch)
 | Task | Repo | Depends on | Status | PR | Note |
@@ -134,6 +134,8 @@ Results: `github-release` adds `"assets": [names]`; `npm-publish` `{"name", "ver
 - Where the private signing key lives for the local CI (keychain on the maintainer's machine, or a local CI secret) — user, in T-09.
 - npm package name and scope, tap repo name — user (localci's open question, settled in T-09).
 - localci's T-22 (planned on GoReleaser) is rewritten to consume this after approval — localci's planning session.
+- localci's plan asks for a configurable provenance builder id before its T-22 (the `sign` statement names
+  release-cli as the builder today), and treats the tool's name as private although this repo is public — user.
 
 ## Log
 - 2026-11-22: plan written (feature intake). Build and publish as connectors per the user. Not yet approved.
@@ -144,3 +146,6 @@ Results: `github-release` adds `"assets": [names]`; `npm-publish` `{"name", "ver
 - 2026-11-22: phase 1 merged to main (#20): T-01, T-02 and one review fix (fix(T-01): `tag_format` refuses templates git cannot tag). Phase 2 is ready to dispatch.
 - 2026-11-23: phase 2 merged to main (#23): T-03 to T-07 and four review fixes (`fix(T-06)`: npm packs `package_dir` from the release commit; `fix(T-07)`: homebrew-tap skips when github-release did not publish; `fix(T-05)`: assets compared by digest, not size; the formula is not a release asset). Open lows for later: hotfix overwriting a newer formula, archive extras collisions, `GOFLAGS` overwritten, install.sh hardening, timeouts on go/git/gh, `tarfile` `filter=` needs Python 3.11.4+. Phase 3 (T-08 `sign`) is ready to dispatch.
 - 2026-11-23: phase 3 merged to main (#29): T-08 and two review fixes (`fix(T-08)`: the provenance source is an https URL for SSH remotes and never empty; archives and `checksums.txt` are checked against disk before signing). Open lows for later: key file left if `sign` is SIGKILLed, cosign inherits every `RELEASE_SECRET_*`, cosign 3.x not enforced, a failed `sign` with `break_on_error=false` lets `github-release` upload unsigned files without a warning. Not yet run: signing with the real maintainer key (phase 4). Phase 4 (T-09, localci) is ready to dispatch.
+- 2026-11-23: dispatch found T-09 not ready: localci's T-22 does the same work in the same files, waits on localci's
+  T-21 and wave 1, and `release/localci-p4` is not cut. The user linked them: T-09 ships through T-22, no
+  separate worker; `integrate` here marks T-09 once T-22 is integrated in localci.
