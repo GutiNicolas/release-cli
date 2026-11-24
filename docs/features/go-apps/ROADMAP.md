@@ -133,6 +133,18 @@ Results: `github-release` adds `"assets": [names]`; `npm-publish` `{"name", "ver
 |---|---|---|---|---|---|
 | [T-10](tasks/T-10.md) `gh-workflow` connector, GitHub attestations, npm provenance | release-cli | P4 | todo | | not before Actions quota |
 
+## Handoff (2026-11-24)
+- **Published:** phases 1 to 3; phase 4's T-11 (#31, `builder_id`).
+- **In flight:** T-12 (`npm-publish` builds from the release commit) on `release/go-apps-p4`, worker PR pending.
+  localci's T-22 (= T-09 here) is blocked on it (draft PR in localci).
+- **Next steps:** integrate T-12, review it, merge `release/go-apps-p4` to main with a merge commit, then reinstall the
+  tool (`uv tool install --force ~/projects/release-cli`) so localci's T-22 can re-run its dry-run. T-09 closes when
+  localci's T-22 merges. Phase 5 (T-10) waits on GitHub Actions quota.
+  Prompt for a fresh session in `~/projects/release-cli`:
+  ```
+  /gutix:ship integrate docs/features/go-apps — read the Handoff section; integrate and release T-12, then reinstall the tool.
+  ```
+
 ## Open questions
 - Where the private signing key lives for the local CI (keychain on the maintainer's machine, or a local CI secret) — user, in T-09.
 - npm package name and scope, tap repo name — user (localci's open question, settled in T-09).
