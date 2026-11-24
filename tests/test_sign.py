@@ -10,6 +10,7 @@ from __future__ import annotations
 import base64
 import json
 import os
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -278,3 +279,63 @@ def test_sign_needs_a_successful_go_build_and_refuses_a_transparency_log(repo: P
     assert no_build["ok"] is False and "go-build" in no_build["error"]
     tlog = sign.run(_req(repo, prior=_prior(tmp_path), config={"tlog": True}))
     assert tlog["ok"] is False and "transparency log" in tlog["error"]
+
+
+def _manifest_of(*names: str) -> dict[str, Any]:
+    return {"tag": TAG, "commit": "c0ffee", "build": {"main": "./cmd/hello"}, "artifacts": [{"name": n, "kind": "archive", "sha256": "ab" * 32} for n in names]}
+
+
+def test_without_builder_id_the_statement_is_the_one_signed_before_the_setting_existed(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(sign, "_release_cli_version", lambda: "9.9.9")
+    stmt = sign.statement(_manifest_of("hello_1.tar.gz"), {"remote_url": "https://github.com/acme/hello.git"})
+    assert stmt == {
+        "_type": "https://in-toto.io/Statement/v1",
+        "subject": [{"name": "hello_1.tar.gz", "digest": {"sha256": "ab" * 32}}],
+        "predicateType": "https://slsa.dev/provenance/v1",
+        "predicate": {
+            "buildDefinition": {
+                "buildType": "https://github.com/GutiNicolas/release-cli/go-build/v1",
+                "externalParameters": {"source": {"repository": "https://github.com/acme/hello", "tag": TAG, "commit": "c0ffee"}, "build": {"main": "./cmd/hello"}},
+                "resolvedDependencies": [{"uri": f"git+https://github.com/acme/hello@refs/tags/{TAG}", "digest": {"gitCommit": "c0ffee"}}],
+            },
+            "runDetails": {"builder": {"id": "https://github.com/GutiNicolas/release-cli", "version": {"release-cli": "9.9.9"}}},
+        },
+    }
+
+
+def test_builder_id_replaces_the_builder_and_the_tool_name_appears_nowhere() -> None:
+    stmt = sign.statement(_manifest_of("hello_1.tar.gz"), {"remote_url": "https://github.com/acme/hello"}, "https://github.com/acme/app")
+    assert stmt["predicate"]["runDetails"] == {"builder": {"id": "https://github.com/acme/app"}}
+    assert stmt["predicate"]["buildDefinition"]["buildType"] == "https://github.com/acme/app/go-build/v1"
+    assert not re.search("release-cli|gutinicolas", json.dumps(stmt), re.IGNORECASE)
+
+
+@pytest.mark.parametrize("value", ["http://x", "acme", "https://", "", 7, "https://a b/c"])
+def test_builder_id_must_be_an_https_url_and_the_error_names_the_key(value: Any) -> None:
+    with pytest.raises(sign.SignError, match=r"`builder_id`.*https://"):
+        sign._settings({"config": {"builder_id": value}})
+
+
+def test_builder_id_loses_a_trailing_slash_so_build_type_has_no_double_slash() -> None:
+    assert sign._settings({"config": {"builder_id": "https://github.com/acme/app/"}})["builder_id"] == "https://github.com/acme/app"
+    assert "builder_id" not in sign._settings({"config": {}})
+
+
+@needs_cosign
+def test_dry_run_with_builder_id_signs_a_neutral_statement_that_still_verifies(repo: Path, tmp_path: Path) -> None:
+    out = tmp_path / "out"
+    out.mkdir()
+    req = _build(repo, dry_run=True, out_dir=str(out))
+    resp = sign.run({**req, "config": {"builder_id": "https://github.com/acme/app"}})
+    assert resp["ok"], resp
+    attestation = out / f"hello_{VERSION}.intoto.jsonl"
+    payload = base64.b64decode(json.loads(attestation.read_text())["dsseEnvelope"]["payload"]).decode()
+    assert not re.search(r"release-cli|gutinicolas", payload, re.IGNORECASE)
+    stmt = json.loads(payload)
+    assert stmt["predicate"]["runDetails"]["builder"] == {"id": "https://github.com/acme/app"}
+    assert stmt["predicate"]["buildDefinition"]["buildType"] == "https://github.com/acme/app/go-build/v1"
+    verify = ["--key", "cosign.pub", "--insecure-ignore-tlog"]
+    assert _cosign("verify-blob", *verify, "--bundle", "checksums.txt.sig", "checksums.txt", cwd=out).returncode == 0
+    for archive in _archives(out):
+        att = _cosign("verify-blob-attestation", *verify, "--bundle", attestation.name, "--type", "slsaprovenance1", archive.name, cwd=out)
+        assert att.returncode == 0, att.stderr

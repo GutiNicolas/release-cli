@@ -297,7 +297,7 @@ It adds three files next to the build, and `github-release` uploads them:
 | File | What it is |
 |---|---|
 | `checksums.txt.sig` | cosign signature bundle of `checksums.txt` (which lists the sha256 of every archive) |
-| `<binary>_<version>.intoto.jsonl` | signed in-toto statement with SLSA provenance (v1): every archive and its sha256, the tag, the commit, the repository, the build flags, and release-cli and its version as the builder |
+| `<binary>_<version>.intoto.jsonl` | signed in-toto statement with SLSA provenance (v1): every archive and its sha256, the tag, the commit, the repository, the build flags, and as the builder release-cli and its version (or your own `builder_id`, below) |
 | `cosign.pub` | the public key, also committed in your repo |
 
 ```toml
@@ -306,7 +306,10 @@ It adds three files next to the build, and `github-release` uploads them:
 public_key = "cosign.pub"              # default; committed in the app repo, the pair of the private key below
 # key_secret = "cosign-key"            # default secret names
 # password_secret = "cosign-password"
+# builder_id = "https://github.com/acme/app"   # optional https:// URL, see below
 ```
+
+By default the provenance names release-cli (its repository URL and version) as the builder. Set `builder_id` when your release files must not name the tool: `runDetails.builder.id` becomes that URL, `buildDefinition.buildType` becomes `<builder_id>/go-build/v1`, and the builder version is left out (it is optional in SLSA v1), so the tool's name appears nowhere in the statement. Anything that is not an `https://` URL is refused. Without it the statement is unchanged.
 
 Set it up once:
 
