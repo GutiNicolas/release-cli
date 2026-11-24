@@ -1,7 +1,7 @@
 [project]
 name = "release-cli"
 version = "0.3.0"
-description = "CLI for Maven, Gradle, and sbt release candidates and final versions"
+description = "Cut release candidates and final versions for Maven, Gradle, sbt and Go projects"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "GPL-3.0-only" }

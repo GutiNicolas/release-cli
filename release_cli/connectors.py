@@ -1,7 +1,7 @@
 """Connectors: post-push steps run as subprocesses speaking JSON protocol 1.
 
 A connector never touches the tag. It gets a context on stdin, answers on stdout,
-and logs on stderr. See README "Connectors" for the contract.
+and logs on stderr. See docs/connectors.md "Writing a connector" for the contract.
 """
 
 from __future__ import annotations
