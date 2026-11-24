@@ -115,10 +115,10 @@ Results: `github-release` adds `"assets": [names]`; `npm-publish` `{"name", "ver
 | [T-07](tasks/T-07.md) `homebrew-tap` connector and install script | release-cli | T-04 | merged | [#27](https://github.com/GutiNicolas/release-cli/pull/27) | parallel |
 
 ### Phase 3: signed provenance, local (before localci's launch)
-**Phase 3 release:** open, [#29](https://github.com/GutiNicolas/release-cli/pull/29) (release/go-apps-p3 → main); last reviewed: e644460 (2026-11-23, 6 findings: 0 critical, 0 high, 2 medium, 4 low).
+**Phase 3 release:** merged 2026-11-23 via [#29](https://github.com/GutiNicolas/release-cli/pull/29) (merge commit bdae463); last reviewed: 9fe985c (2026-11-23; round 1 at e644460: 6 findings, 0 critical, 0 high, 2 medium fixed, 4 low open; round 2 over the fixes: 0).
 | Task | Repo | Depends on | Status | PR | Note |
 |---|---|---|---|---|---|
-| [T-08](tasks/T-08.md) `sign` connector: cosign signature and SLSA provenance | release-cli | P2 | integrated | [#28](https://github.com/GutiNicolas/release-cli/pull/28) | |
+| [T-08](tasks/T-08.md) `sign` connector: cosign signature and SLSA provenance | release-cli | P2 | merged | [#28](https://github.com/GutiNicolas/release-cli/pull/28) | |
 
 ### Phase 4: first consumer
 | Task | Repo | Depends on | Status | PR | Note |
@@ -143,3 +143,4 @@ Results: `github-release` adds `"assets": [names]`; `npm-publish` `{"name", "ver
 - 2026-11-22: phase 1 merged to main (#20): T-01, T-02 and one review fix (`fix(T-01)`: `tag_format` refuses templates git cannot tag). Phase 2 is ready to dispatch.
 - 2026-11-22: phase 1 merged to main (#20): T-01, T-02 and one review fix (fix(T-01): `tag_format` refuses templates git cannot tag). Phase 2 is ready to dispatch.
 - 2026-11-23: phase 2 merged to main (#23): T-03 to T-07 and four review fixes (`fix(T-06)`: npm packs `package_dir` from the release commit; `fix(T-07)`: homebrew-tap skips when github-release did not publish; `fix(T-05)`: assets compared by digest, not size; the formula is not a release asset). Open lows for later: hotfix overwriting a newer formula, archive extras collisions, `GOFLAGS` overwritten, install.sh hardening, timeouts on go/git/gh, `tarfile` `filter=` needs Python 3.11.4+. Phase 3 (T-08 `sign`) is ready to dispatch.
+- 2026-11-23: phase 3 merged to main (#29): T-08 and two review fixes (`fix(T-08)`: the provenance source is an https URL for SSH remotes and never empty; archives and `checksums.txt` are checked against disk before signing). Open lows for later: key file left if `sign` is SIGKILLed, cosign inherits every `RELEASE_SECRET_*`, cosign 3.x not enforced, a failed `sign` with `break_on_error=false` lets `github-release` upload unsigned files without a warning. Not yet run: signing with the real maintainer key (phase 4). Phase 4 (T-09, localci) is ready to dispatch.
