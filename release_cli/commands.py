@@ -100,10 +100,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     upd = sub.add_parser(
         "update",
-        help="pull the release-cli clone and reinstall it (from any directory); asks only new config keys",
-        description="Pull the release-cli clone (source.toml or the uv receipt), reinstall with uv, ask only new or "
-        "changed global config keys. Built-in connectors update with it; connectors installed from a URL stay on "
-        "their SHA. Never rewrites connectors.toml or project .release files.",
+        help="update release-cli (from any directory); asks only new config keys",
+        description="Clone installs: pull the release-cli clone (source.toml or the uv receipt), reinstall with uv, ask "
+        "only new or changed global config keys. Homebrew or `uv tool install git+...` installs: print the upgrade "
+        "command and ask only the new config keys. Built-in connectors update with it; connectors installed from a URL "
+        "stay on their SHA. Never rewrites connectors.toml or project .release files.",
     )
     _defaults_flag(upd)
     upd.add_argument("--config-only", action="store_true", help=argparse.SUPPRESS)
@@ -208,8 +209,17 @@ def update_command(ns: argparse.Namespace) -> None:
     elif ns.config_only:
         asked = update.ensure_config(defaults=ns.defaults, log=info)
         info(f"config saved: {', '.join(asked)}" if asked else "config: nothing new to ask")
+        _add_cursor_review_if_just_enabled(asked)
     else:
-        update.update(defaults=ns.defaults, log=info)
+        _add_cursor_review_if_just_enabled(update.update(defaults=ns.defaults, log=info))
+
+
+def _add_cursor_review_if_just_enabled(asked: list[str]) -> None:
+    """Homebrew and uv installs never run install.sh, so a yes to cursor-review here also installs its connector."""
+    if "cursor-review.notify" not in asked or cx.load_release_toml().get("cursor-review", {}).get("notify") is not True:
+        return
+    if "cursor-review" not in cx.load_global()["connectors"]:
+        connector_add("cursor-review", defaults=True)
 
 
 def after_install(root: Path, *, defaults: bool, ask: prompts.Ask = input) -> None:
@@ -271,7 +281,7 @@ def resolve_sha(url: str, ref: str) -> str:
 def install(url: str, sha: str) -> list[dict[str, str]]:
     uv = shutil.which("uv")
     if uv is None:
-        raise cx.ConnectorError("uv is required: curl -LsSf https://astral.sh/uv/install.sh | sh")
+        raise cx.ConnectorError(f"uv is required to install a connector from a URL: {update.uv_install_hint()}")
     if not cx.env_python().is_file():
         _run([uv, "venv", str(cx.env_dir())])
     _run([uv, "pip", "install", "--python", str(cx.env_python()), "--reinstall", f"git+{url}@{sha}"])
