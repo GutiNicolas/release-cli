@@ -122,10 +122,11 @@ Results: `github-release` adds `"assets": [names]`; `npm-publish` `{"name", "ver
 
 ### Phase 4: first consumer
 **Phase 4 release (T-11):** merged 2026-11-24 via [#31](https://github.com/GutiNicolas/release-cli/pull/31) (merge commit bf2c296); last reviewed: 99d3abd (2026-11-24; 1 low open: a `builder_id` with a query or fragment is accepted and gives a malformed `buildType`). T-09 closes when localci's T-22 merges.
+**Phase 4 release (T-12):** merged 2026-11-24 via [#33](https://github.com/GutiNicolas/release-cli/pull/33) (merge commit 3fe21f8); reviewed in the release session: 1 medium fixed before merge (`fix(T-12)` d77838e: dependency code could read the npm token during `npm ci`).
 | Task | Repo | Depends on | Status | PR | Note |
 |---|---|---|---|---|---|
 | [T-11](tasks/T-11.md) `sign`: configurable provenance builder id | release-cli | P3 | merged | [#30](https://github.com/GutiNicolas/release-cli/pull/30) | localci's T-22 needs it: its public provenance must not name the tool |
-| [T-12](tasks/T-12.md) `npm-publish` builds the package from the release commit | release-cli | T-11 | in progress | | localci's T-22 dry-run: `prepack` (`tsc`) fails in the archive |
+| [T-12](tasks/T-12.md) `npm-publish` builds the package from the release commit | release-cli | T-11 | merged | [#32](https://github.com/GutiNicolas/release-cli/pull/32) | localci's T-22 dry-run: `prepack` (`tsc`) fails in the archive |
 | [T-09](tasks/T-09.md) localci releases with release-cli (acceptance) | localci | T-11, T-12, localci's T-22 | todo | | ships as localci's T-22 (its plan, its worker, base `release/localci-p4`); no separate worker. Done when T-22 merges with these criteria met |
 
 ### Phase 5: CI-identity provenance (when GitHub Actions has quota; after launch)
@@ -175,3 +176,6 @@ Results: `github-release` adds `"assets": [names]`; `npm-publish` `{"name", "ver
   TypeScript workspace package (the `git archive` of `package_dir` has no `node_modules`; `prepack` fails). Still from
   the release commit: whole-commit archive plus `npm ci` when there is a lockfile. Also seen: the installed tool was
   stale (rejected `tool = "go"`); reinstall it from main after this release.
+- 2026-11-24: T-12 merged to main (#33, merge commit 3fe21f8) with one review fix (`fix(T-12)`: `npm ci --ignore-scripts`
+  without the token, and no `RELEASE_SECRET_*` for `npm ci`/`npm pack`). #33 was merged before its own checks finished;
+  the same code was green on #32 and main's run was checked afterwards. Tool reinstalled from main for localci's T-22.
