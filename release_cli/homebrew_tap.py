@@ -129,7 +129,20 @@ def _gh(gh: str, token: str, *args: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run([gh, *args], capture_output=True, text=True, check=False, env=env, timeout=TIMEOUT)
 
 
-def _publish(tap: str, binary: str, version: str, formula: str, token: str) -> tuple[str | None, str | None]:
+def _git_identity(repo_root: str | None) -> tuple[str, str] | None:
+    """The released repo's `user.name` and `user.email`, or None when either is unset."""
+    if not repo_root:
+        return None
+    got = []
+    for key in ("user.name", "user.email"):
+        out = subprocess.run(["git", "-C", repo_root, "config", key], capture_output=True, text=True, check=False, timeout=TIMEOUT)
+        if out.returncode != 0 or not out.stdout.strip():
+            return None
+        got.append(out.stdout.strip())
+    return got[0], got[1]
+
+
+def _publish(tap: str, binary: str, version: str, formula: str, token: str, identity: tuple[str, str] | None = None) -> tuple[str | None, str | None]:
     """Commit the formula to the tap. Returns (commit sha, None), or (None, reason) when the tap already has it."""
     gh = shutil.which("gh")
     if gh is None:
@@ -147,6 +160,9 @@ def _publish(tap: str, binary: str, version: str, formula: str, token: str) -> t
     args = ["api", "--method", "PUT", path, "-f", f"message={binary} {version}", "-f", f"content={base64.b64encode(formula.encode()).decode()}"]
     if sha:
         args += ["-f", f"sha={sha}"]
+    if identity:
+        # without it GitHub uses the token owner's primary email, which a public tap would publish
+        args += ["-f", f"committer[name]={identity[0]}", "-f", f"committer[email]={identity[1]}"]
     args += ["--jq", ".commit.sha"]
     put = _gh(gh, token, *args)
     if put.returncode != 0:
@@ -195,7 +211,7 @@ def run(req: dict[str, Any]) -> dict[str, Any]:
         token = secrets.get(spec["secret"])
         if not token:
             raise TapError(f"secret {spec['secret']!r} is not set; run `release secret set {spec['secret']}`")
-        commit, reason = _publish(spec["tap"], binary, version, formula, token)
+        commit, reason = _publish(spec["tap"], binary, version, formula, token, _git_identity(req.get("repo_root")))
     except (TapError, secrets.SecretError, OSError, subprocess.SubprocessError, ValueError) as exc:
         return _fail(str(exc))
     if commit:

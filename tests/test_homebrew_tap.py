@@ -167,6 +167,17 @@ def test_a_final_commits_the_formula_once_and_a_resume_does_not_commit_again(tmp
     assert not any("tap-token-value" in " ".join(c["args"]) for c in _calls(fake_gh))
 
 
+def test_the_formula_commit_carries_the_released_repos_git_identity_not_the_accounts_email(tmp_path: Path, fake_gh: Path) -> None:
+    # without it GitHub signs the commit with the token owner's primary email, public on a public tap
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    subprocess.run(["git", "-C", str(tmp_path), "config", "user.name", "Rel Ease"], check=True)
+    subprocess.run(["git", "-C", str(tmp_path), "config", "user.email", "1+rel@users.noreply.github.com"], check=True)
+    run = parse_run(homebrew_tap.run(_req(tmp_path, _manifest(tmp_path / "dist"))))
+    assert run.status == "ok", run.error
+    put = [c for c in _calls(fake_gh) if "--method" in c["args"]][-1]["args"]
+    assert "committer[name]=Rel Ease" in put and "committer[email]=1+rel@users.noreply.github.com" in put
+
+
 def test_a_new_release_updates_the_formula_it_finds_in_the_tap(tmp_path: Path, fake_gh: Path) -> None:
     assert parse_run(homebrew_tap.run(_req(tmp_path, _manifest(tmp_path / "dist")))).status == "ok"
     newer = {**_manifest(tmp_path / "dist2"), "version": "1.3.0"}
