@@ -258,7 +258,7 @@ When the remote is on github.com it also renders `install.sh` next to the archiv
 
 ### npm-publish
 
-Optional, built in: `release connector add npm-publish`, after `go-build` in the order. It publishes the app's npm package (for example a wrapper that downloads the binary) with **the same version as the release**, without touching the tracked `package.json`: the package folder is copied to a temp dir, its `version` is set there, `npm pack` writes `<name>-<version>.tgz` into the `go-build` output (`@scope/name` becomes `scope-name`), and `npm publish <tgz>` uploads it. `npm` must be on `PATH`.
+Optional, built in: `release connector add npm-publish`, after `go-build` in the order. It publishes the app's npm package (for example a wrapper that downloads the binary) with **the same version as the release**, without touching the tracked `package.json`: the release commit is extracted whole into a temp dir (never the working tree), the `version` of the package folder is set there, `npm ci` runs where the lockfile is (the repo root when it has a `package-lock.json`, so workspaces get their dev dependencies; else the package folder; with none, nothing is installed), so a `prepack` build such as `tsc` works, `npm pack` (which runs `prepack`) writes `<name>-<version>.tgz` into the `go-build` output (`@scope/name` becomes `scope-name`), and `npm publish <tgz>` uploads it. It runs with `--ignore-scripts` and without the npm token, and neither it nor `npm pack` (which runs `prepack`) sees any `RELEASE_SECRET_*` variable, so dependency code cannot read the publish token. `npm` must be on `PATH`.
 
 ```toml
 # .release
