@@ -82,10 +82,15 @@ def check_install(global_cfg: dict[str, Any] | None) -> list[Check]:
     out.append(
         _ok("tool uv", "found")
         if uv
-        else _warn("tool uv", "uv not found; connectors and `release update` need it", "curl -LsSf https://astral.sh/uv/install.sh | sh")
+        else _warn("tool uv", "uv not found; connectors installed from a URL need it", update.uv_install_hint())
     )
     if global_cfg and "github-release" in global_cfg["connectors"]:
         out.extend(_check_gh())
+    channel = update.managed_channel()
+    if channel is not None:
+        version = update._installed_version() or "?"
+        out.append(_ok("install", f"release-cli {version}, installed with {channel.name} (upgrade: {channel.upgrade})"))
+        return out
     if not git_ok:
         return out
     src = update.find_source()

@@ -1,5 +1,8 @@
 """`release update`: pull the release-cli clone, reinstall it with uv, ask only new or changed config keys.
 
+When the running release-cli belongs to a package manager (Homebrew, or `uv tool install` of a git URL), there is no
+clone to pull: it prints that manager's upgrade command and only asks the new config keys.
+
 Never moves connectors installed from a URL (they stay on their SHA), never rewrites connectors.toml,
 and never touches a project .release. Built-in connectors ship inside release-cli, so reinstalling updates them.
 """
@@ -9,6 +12,7 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import sys
 import tomllib
 from dataclasses import dataclass
 from importlib import metadata
@@ -168,20 +172,72 @@ def uv_tool_dir() -> Path:
     return Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local" / "share") / "uv" / "tools"
 
 
-def _receipt_path() -> Path | None:
+def _receipt_requirement() -> dict[str, Any] | None:
     receipt = uv_tool_dir() / PACKAGE / "uv-receipt.toml"
     if not receipt.is_file():
         return None
     try:
         data = tomllib.loads(receipt.read_text(encoding="utf-8"))
-    except tomllib.TOMLDecodeError:
+    except (OSError, tomllib.TOMLDecodeError):
         return None
     for req in data.get("tool", {}).get("requirements", []):
         if isinstance(req, dict) and req.get("name") == PACKAGE:
-            raw = req.get("directory") or req.get("editable") or req.get("path")
-            if isinstance(raw, str):
-                return Path(raw)
+            return req
     return None
+
+
+def _local_dir(req: dict[str, Any]) -> str | None:
+    raw = req.get("directory") or req.get("editable") or req.get("path")
+    return raw if isinstance(raw, str) else None
+
+
+def _receipt_path() -> Path | None:
+    req = _receipt_requirement()
+    raw = _local_dir(req) if req else None
+    return Path(raw) if raw else None
+
+
+# ---------- package-manager installs ----------
+
+
+@dataclass(frozen=True)
+class Channel:
+    """A release-cli installed by a package manager: no clone to pull, the manager upgrades it."""
+
+    name: str
+    upgrade: str
+    uv_hint: str
+
+
+UV_INSTALL = "curl -LsSf https://astral.sh/uv/install.sh | sh"
+HOMEBREW = Channel("Homebrew", "brew upgrade release-cli", "brew install uv")
+UV_TOOL = Channel("uv", "uv tool upgrade release-cli", UV_INSTALL)
+
+
+def _resolved(raw: str | Path) -> Path:
+    try:
+        return Path(raw).resolve()
+    except OSError:
+        return Path(raw)
+
+
+def managed_channel() -> Channel | None:
+    """Decided by the running interpreter, so a source.toml left over from an earlier clone install does not win."""
+    parts = _resolved(sys.prefix).parts
+    # A Homebrew formula's virtualenv lives in <cellar>/release-cli/<version>/libexec.
+    if any(part == "Cellar" and nxt == PACKAGE for part, nxt in zip(parts, parts[1:], strict=False)):
+        return HOMEBREW
+    if _resolved(sys.prefix) == _resolved(uv_tool_dir() / PACKAGE):
+        req = _receipt_requirement()
+        # A uv receipt pointing at a local directory is the clone install.sh made; `release update` pulls that.
+        if req is not None and _local_dir(req) is None:
+            return UV_TOOL
+    return None
+
+
+def uv_install_hint() -> str:
+    channel = managed_channel()
+    return channel.uv_hint if channel else UV_INSTALL
 
 
 def _describe(path: Path, found_in: str, remote: str = "", branch: str = "") -> Source:
@@ -232,11 +288,18 @@ def _installed_version() -> str | None:
 
 
 def update(*, defaults: bool, log: Callable[[str], None] = print) -> None:
+    channel = managed_channel()
+    if channel is not None:
+        log(f"release-cli {_installed_version() or '?'} was installed with {channel.name}; upgrade it with: {channel.upgrade}")
+        log("this command only asks the settings a new version adds, so run it again after upgrading")
+        asked = ensure_config(defaults=defaults, log=log)
+        log(f"config saved: {', '.join(asked)}" if asked else "config: nothing new to ask")
+        return
     src = find_source()
     if src is None:
         raise UpdateError(
             "no release-cli source found (no ~/.config/release/source.toml, no uv receipt pointing at a git clone). "
-            f"install it: git clone {INSTALL_URL} && cd release-cli && ./install.sh"
+            f"install it: brew install GutiNicolas/tap/release-cli, or git clone {INSTALL_URL} && cd release-cli && ./install.sh"
         )
     log(f"source: {src.path} ({src.found_in})")
     dirty = _git(src.path, "status", "--porcelain").stdout.strip()
@@ -247,7 +310,7 @@ def update(*, defaults: bool, log: Callable[[str], None] = print) -> None:
         raise UpdateError(f"{src.path} is on {current}, but release-cli was installed from {src.branch}; check it out first")
     uv = shutil.which("uv")
     if uv is None:
-        raise UpdateError("uv is required: curl -LsSf https://astral.sh/uv/install.sh | sh")
+        raise UpdateError(f"uv is required: {UV_INSTALL}")
     old_sha = _git(src.path, "rev-parse", "--short", "HEAD").stdout.strip()
     old_version = _installed_version() or _pyproject_version(src.path)
     _git(src.path, "pull", "--ff-only", "origin", current)

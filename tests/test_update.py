@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from release_cli import commands, connectors, update
+from release_cli import commands, connectors, doctor, update
 from release_cli.cli import main
 
 REPO = Path(__file__).resolve().parents[1]
@@ -218,10 +218,16 @@ def test_no_source_prints_install_url_and_writes_no_config(env: dict[str, Path],
     assert uv_calls(env) == []
 
 
-def test_uv_receipt_is_the_fallback_and_source_toml_is_written(env: dict[str, Path]) -> None:
+def _uv_receipt(requirement: str) -> Path:
     receipt = update.uv_tool_dir() / "release-cli" / "uv-receipt.toml"
     receipt.parent.mkdir(parents=True)
-    receipt.write_text(f'[tool]\nrequirements = [{{ name = "release-cli", directory = "{env["clone"]}" }}]\n', encoding="utf-8")
+    receipt.write_text(f'[tool]\nrequirements = [{{ name = "release-cli", {requirement} }}]\n', encoding="utf-8")
+    return receipt.parent
+
+
+def test_uv_receipt_is_the_fallback_and_source_toml_is_written(env: dict[str, Path], monkeypatch: pytest.MonkeyPatch) -> None:
+    # install.sh: the running release lives in the uv tool environment, and the receipt points at the clone.
+    monkeypatch.setattr(sys, "prefix", str(_uv_receipt(f'directory = "{env["clone"]}"')))
     main(["update", "--defaults"])
     assert uv_calls(env) == [["tool", "install", "--force", str(env["clone"])]]
     assert f'path = "{env["clone"].resolve()}"' in update.source_toml_path().read_text(encoding="utf-8")
@@ -236,3 +242,30 @@ def test_after_install_asks_cursor_review_only_once(env: dict[str, Path]) -> Non
     source = update.source_toml_path().read_text(encoding="utf-8")
     assert 'branch = "main"' in source and str(env["remote"]) in source
     commands.after_install(env["clone"], defaults=False, ask=lambda _p: pytest.fail("asked again"))
+
+
+def test_homebrew_install_prints_brew_upgrade_and_ignores_an_old_clone(
+    env: dict[str, Path], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # Switched from a clone to brew: source.toml still names the clone, but the running interpreter is brew's.
+    update.register_source(env["clone"])
+    head = git(env["clone"], "rev-parse", "HEAD")
+    monkeypatch.setattr(sys, "prefix", str(env["tmp"] / "homebrew" / "Cellar" / "release-cli" / "0.4.0" / "libexec"))
+    main(["update", "--defaults"])
+    assert "brew upgrade release-cli" in capsys.readouterr().out
+    assert git(env["clone"], "rev-parse", "HEAD") == head
+    assert uv_calls(env) == []
+    assert connectors.load_release_toml()["cursor-review"]["notify"] is False
+
+
+def test_uv_git_install_prints_uv_tool_upgrade(env: dict[str, Path], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    monkeypatch.setattr(sys, "prefix", str(_uv_receipt('git = "https://github.com/GutiNicolas/release-cli"')))
+    main(["update", "--defaults"])
+    assert "uv tool upgrade release-cli" in capsys.readouterr().out
+    assert uv_calls(env) == []
+
+
+def test_doctor_install_check_passes_under_homebrew_without_a_clone(env: dict[str, Path], monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(sys, "prefix", str(env["tmp"] / "linuxbrew" / "Cellar" / "release-cli" / "0.4.0" / "libexec"))
+    (check,) = [c for c in doctor.check_install(None) if c.name == "install"]
+    assert check.status == doctor.OK and "Homebrew" in check.message

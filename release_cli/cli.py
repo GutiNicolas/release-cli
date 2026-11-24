@@ -58,7 +58,7 @@ commands:
   release status [--json]   release history [--limit N] [--finals] [--json]
   release notes [tag]   release undo <rc-tag>
   release hotfix <X.Y.Z>   (branch hotfix/X.Y.Z+1 from a released tag; `release -rc` there ships the patch)
-  release update   (pull the release-cli clone and reinstall, from any directory)
+  release update   (pull the clone and reinstall; under Homebrew or uv it prints the upgrade command)
   release doctor [--json]   (why release would not work here; changes nothing)
   release secret set|rm <name>   release secret ls   (tokens and webhook URLs: OS keychain, never a config file)
 
