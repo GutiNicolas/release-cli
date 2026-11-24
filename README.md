@@ -76,9 +76,13 @@ You need macOS or Linux and git. The build tools (`mvn`, `gradle` / `./gradlew`,
 ### Homebrew (macOS and Linux)
 
 ```sh
+brew tap GutiNicolas/tap
+brew trust --formula GutiNicolas/tap/release-cli
 brew install GutiNicolas/tap/release-cli
 release --version
 ```
+
+Homebrew 7 and later only load formulae from outside its own taps once you trust them, which is what `brew trust` does. On an older Homebrew that has no `brew trust`, skip that line.
 
 Homebrew brings its own Python. The built-in connectors work as they are; a connector installed from a URL (`release connector add <url>`) also needs [uv](https://docs.astral.sh/uv/): `brew install uv`.
 
@@ -93,6 +97,7 @@ Uninstall:
 
 ```sh
 brew uninstall release-cli
+brew untrust --formula GutiNicolas/tap/release-cli
 brew untap GutiNicolas/tap
 ```
 
