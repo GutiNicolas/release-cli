@@ -115,7 +115,7 @@ Results: `github-release` adds `"assets": [names]`; `npm-publish` `{"name", "ver
 | [T-07](tasks/T-07.md) `homebrew-tap` connector and install script | release-cli | T-04 | merged | [#27](https://github.com/GutiNicolas/release-cli/pull/27) | parallel |
 
 ### Phase 3: signed provenance, local (before localci's launch)
-**Phase 3 release:** open, [#29](https://github.com/GutiNicolas/release-cli/pull/29) (release/go-apps-p3 → main); not reviewed yet.
+**Phase 3 release:** open, [#29](https://github.com/GutiNicolas/release-cli/pull/29) (release/go-apps-p3 → main); last reviewed: e644460 (2026-11-23, 6 findings: 0 critical, 0 high, 2 medium, 4 low).
 | Task | Repo | Depends on | Status | PR | Note |
 |---|---|---|---|---|---|
 | [T-08](tasks/T-08.md) `sign` connector: cosign signature and SLSA provenance | release-cli | P2 | integrated | [#28](https://github.com/GutiNicolas/release-cli/pull/28) | |
