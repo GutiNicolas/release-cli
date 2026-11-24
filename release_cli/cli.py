@@ -12,6 +12,7 @@ from release_cli import connectors as cx
 from release_cli.adapters.base import AdapterError
 from release_cli.config import Config, ConfigError, load
 from release_cli.connectors import ChainInterrupted, ConnectorError
+from release_cli.github_release import TOOL_COMMIT_PREFIX
 from release_cli.hooks import HookError, run_hooks
 from release_cli.init import InitError, initialize
 from release_cli.prompts import PromptError
@@ -359,7 +360,7 @@ def _release(ns: argparse.Namespace) -> None:
             ask=input,
         )
         rel_names = [str(path.relative_to(cwd)) for path in changed]
-        gitops.commit(rel_names, f"[manual-release] Prepare release {release_ver}")
+        gitops.commit(rel_names, f"{TOOL_COMMIT_PREFIX} Prepare release {release_ver}")
         for tag in tags:
             gitops.annotate_tag(tag, f"Release {tag}")
             tagged.append(tag)
@@ -370,7 +371,7 @@ def _release(ns: argparse.Namespace) -> None:
             snapshot_ver,
             scm_tag=_scm_for(cfg, artifact, release_ver, snapshot=True),
         )
-        gitops.commit(rel_names, f"[manual-release] Prepare for next iteration ({snapshot_ver})")
+        gitops.commit(rel_names, f"{TOOL_COMMIT_PREFIX} Prepare for next iteration ({snapshot_ver})")
         pushing = True
         gitops.push_atomic(tags)
     except BaseException as exc:

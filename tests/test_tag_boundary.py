@@ -289,7 +289,7 @@ def test_notes_lists_commits_since_previous_tag_without_release_commits(repo: Pa
     commands.notes(repo, None)
     out = capsys.readouterr().out
     assert "Changes since 1.5.0-rc0" in out and "Add the feature" in out
-    assert "manual-release" not in out
+    assert "[release-cli]" not in out
 
 
 def _cli(repo: Path, *args: str) -> subprocess.CompletedProcess[str]:

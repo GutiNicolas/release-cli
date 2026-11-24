@@ -54,7 +54,7 @@ def repo(tmp_path: Path, git_env: None) -> Path:
     _git(root, "tag", "-a", "1.0.0-rc0", "-m", "rc")
     _git(root, "tag", "-a", "app-1.0.0-rc0", "-m", "rc")
     _commit(root, "add login")
-    _commit(root, "[manual-release] 1.0.0-rc1")
+    _commit(root, "[release-cli] 1.0.0-rc1")
     _commit(root, "fix logout")
     _git(root, "tag", "-a", "1.0.0-rc1", "-m", "rc")
     return root
@@ -66,7 +66,7 @@ def test_release_notes_since_previous_tag_drops_tool_commits(repo: Path) -> None
     assert lines[0] == "## Changes since 1.0.0-rc0"
     bullets = [ln for ln in lines if ln.startswith("- ")]
     assert [b.rsplit(" (", 1)[0] for b in bullets] == ["- fix logout", "- add login"]
-    assert "manual-release" not in notes
+    assert "[release-cli]" not in notes and "[manual-release]" not in notes  # older releases used the old prefix
 
 
 def test_release_notes_without_previous_tag_and_when_empty(repo: Path) -> None:

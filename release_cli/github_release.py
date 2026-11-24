@@ -25,7 +25,9 @@ from typing import Any, Callable
 from release_cli.tagformat import TagScheme, scheme_of, tag_of
 from release_cli.versioning import ProjectVersion, parse
 
-TOOL_COMMIT_PREFIX = "[manual-release]"
+TOOL_COMMIT_PREFIX = "[release-cli]"
+# prefixes of the tool's own commits, current first; older releases used `[manual-release]`
+TOOL_COMMIT_PREFIXES = (TOOL_COMMIT_PREFIX, "[manual-release]")
 GITHUB_REMOTE = re.compile(r"^(?:https?://(?:[^@/]+@)?github\.com/|ssh://git@github\.com(?::\d+)?/|git@github\.com:)[^/\s]+/[^/\s]+?(?:\.git)?/?$")
 GH_MISSING = "the GitHub CLI `gh` is not on PATH; install it (https://cli.github.com) and run `gh auth login`"
 
@@ -100,7 +102,7 @@ def release_notes(repo_root: Path, tag: str, scheme: TagScheme | None = None) ->
     bullets = []
     for line in log.splitlines():
         sha, _, subject = line.partition("\t")
-        if subject.startswith(TOOL_COMMIT_PREFIX):
+        if subject.startswith(TOOL_COMMIT_PREFIXES):
             continue
         bullets.append(f"- {subject} ({sha})")
     heading = f"## Changes since {prev}" if prev else "## Changes"
