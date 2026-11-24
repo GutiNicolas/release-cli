@@ -121,9 +121,10 @@ Results: `github-release` adds `"assets": [names]`; `npm-publish` `{"name", "ver
 | [T-08](tasks/T-08.md) `sign` connector: cosign signature and SLSA provenance | release-cli | P2 | merged | [#28](https://github.com/GutiNicolas/release-cli/pull/28) | |
 
 ### Phase 4: first consumer
+**Phase 4 release (T-11):** merged 2026-11-24 via [#31](https://github.com/GutiNicolas/release-cli/pull/31) (merge commit bf2c296); last reviewed: 99d3abd (2026-11-24; 1 low open: a `builder_id` with a query or fragment is accepted and gives a malformed `buildType`). T-09 closes when localci's T-22 merges.
 | Task | Repo | Depends on | Status | PR | Note |
 |---|---|---|---|---|---|
-| [T-11](tasks/T-11.md) `sign`: configurable provenance builder id | release-cli | P3 | integrated | [#30](https://github.com/GutiNicolas/release-cli/pull/30) | localci's T-22 needs it: its public provenance must not name the tool |
+| [T-11](tasks/T-11.md) `sign`: configurable provenance builder id | release-cli | P3 | merged | [#30](https://github.com/GutiNicolas/release-cli/pull/30) | localci's T-22 needs it: its public provenance must not name the tool |
 | [T-09](tasks/T-09.md) localci releases with release-cli (acceptance) | localci | T-11, localci's T-22 | todo | | ships as localci's T-22 (its plan, its worker, base `release/localci-p4`); no separate worker. Done when T-22 merges with these criteria met |
 
 ### Phase 5: CI-identity provenance (when GitHub Actions has quota; after launch)
@@ -154,3 +155,6 @@ Results: `github-release` adds `"assets": [names]`; `npm-publish` `{"name", "ver
 - 2026-11-24: T-11 added to phase 4 (autonomous run the user asked for): localci's T-22 contract needs the `sign`
   provenance to carry a configurable builder id, and today `builder.id`, `builder.version` and `buildType` all name
   the tool. T-09 now also waits on T-11.
+- 2026-11-24: T-11 merged to main (#31, merge commit bf2c296): `[connectors.sign] builder_id`. Reviewed in the release
+  session, no fix before merge; one low open (query or fragment in `builder_id`). `release/go-apps-p4` deleted. T-09
+  waits on localci's T-22 (which needs the maintainer's cosign key pair).
