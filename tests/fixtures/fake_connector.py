@@ -25,7 +25,14 @@ def echo():
     reply({"protocol": 1, "ok": True, "result": {"answers": req.get("answers"), "prior": sorted(req["prior"]), "by": req["connector"]}})
 
 
+SAFE = {"safe", "safe-fail", "safe-int"}
+
 if action == "questions":
+    if behavior in SAFE:
+        items = [{"id": "retries", "type": "int", "prompt": "Retries", "default": 3, "persist": "project"}] if behavior == "safe-int" else []
+        reply({"protocol": 1, "dry_run": "safe", "questions": items})
+    if behavior == "bad-dry-run":
+        reply({"protocol": 1, "dry_run": "yes", "questions": []})
     if behavior == "broken-json":
         sys.stdout.write("{not json")
         sys.exit(0)
@@ -70,6 +77,16 @@ if action == "questions":
         reply({"protocol": 1, "questions": [{"id": "go", "type": "bool", "prompt": "Go?", "default": True}]})
     reply({"protocol": 1, "questions": [], "timeout_seconds": 1 if behavior == "slow-run" else 60})
 
+if behavior in SAFE:
+    # a build that only writes into out_dir; reports what it saw so tests can check the hand-over
+    if behavior == "safe-fail":
+        print("build FAILURE: compile error", file=sys.stderr)
+        reply({"protocol": 1, "ok": False, "error": "compile error", "result": {}})
+    out = req.get("out_dir")
+    if out:
+        with open(os.path.join(out, req["connector"] + ".txt"), "w", encoding="utf-8") as fh:
+            fh.write(",".join(sorted(req["prior"])))
+    reply({"protocol": 1, "ok": True, "result": {"out_dir": out, "dry_run": req["dry_run"], "prior": sorted(req["prior"]), "tags": req["tags"], "sha": req["sha"]}})
 if behavior == "fail":
     print("build FAILURE: tests failed", file=sys.stderr)
     reply({"protocol": 1, "ok": False, "error": "FAILURE", "result": {"status": "FAILURE"}})

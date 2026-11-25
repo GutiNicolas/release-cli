@@ -1,0 +1,9 @@
+{
+  "name": "@acme/cli",
+  "version": "0.1.0-SNAPSHOT",
+  "license": "MIT",
+  "main": "dist/index.js",
+  "files": ["dist"],
+  "scripts": { "prepack": "tsc -p ." },
+  "devDependencies": { "typescript": "5.6.3" }
+}

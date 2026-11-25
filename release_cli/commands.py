@@ -29,6 +29,7 @@ from release_cli.config import (
     set_connector_value,
     update_file,
 )
+from release_cli.tagformat import DEFAULT, TagScheme
 from release_cli.ui import alert, fail, info, warn
 from release_cli.versioning import PlanError, parse
 
@@ -65,8 +66,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     connector = sub.add_parser("connector", help="install and manage connectors (global, ~/.config/release/connectors.toml)")
     csub = connector.add_subparsers(dest="action", required=True)
-    add = csub.add_parser("add", help="install from a GitHub URL (pin with @ref) or add a built-in (cursor-review, github-release, jira)")
-    add.add_argument("target", help="https://github.com/org/repo[@ref], cursor-review, github-release, or jira")
+    add = csub.add_parser("add", help="install from a GitHub URL (pin with @ref) or add a built-in (cursor-review, github-release, go-build, homebrew-tap, jira, sign, slack-notify)")
+    add.add_argument("target", help="https://github.com/org/repo[@ref], cursor-review, github-release, go-build, homebrew-tap, jira, sign, or slack-notify")
     _defaults_flag(add)
     csub.add_parser("ls", help="list installed connectors, order, and installed SHA")
     update = csub.add_parser("update", help="reinstall a connector from its source (explicit; never during a release)")
@@ -99,10 +100,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     upd = sub.add_parser(
         "update",
-        help="pull the release-cli clone and reinstall it (from any directory); asks only new config keys",
-        description="Pull the release-cli clone (source.toml or the uv receipt), reinstall with uv, ask only new or "
-        "changed global config keys. Built-in connectors update with it; connectors installed from a URL stay on "
-        "their SHA. Never rewrites connectors.toml or project .release files.",
+        help="update release-cli (from any directory); asks only new config keys",
+        description="Clone installs: pull the release-cli clone (source.toml or the uv receipt), reinstall with uv, ask "
+        "only new or changed global config keys. Homebrew or `uv tool install git+...` installs: print the upgrade "
+        "command and ask only the new config keys. Built-in connectors update with it; connectors installed from a URL "
+        "stay on their SHA. Never rewrites connectors.toml or project .release files.",
     )
     _defaults_flag(upd)
     upd.add_argument("--config-only", action="store_true", help=argparse.SUPPRESS)
@@ -127,14 +129,14 @@ def build_parser() -> argparse.ArgumentParser:
     hist.add_argument("--json", action="store_true", help="print one JSON object")
 
     undo = sub.add_parser("undo", help="delete a pushed release candidate's tags (origin and local) after confirming")
-    undo.add_argument("tag", help="X.Y.Z-rcN or <artifact>-X.Y.Z-rcN")
+    undo.add_argument("tag", help="the RC tag, in any form of tag_format (default X.Y.Z-rcN or <artifact>-X.Y.Z-rcN)")
     undo.add_argument("--force", action="store_true", help="do not ask for confirmation")
 
     notes = sub.add_parser("notes", help="release notes (markdown) from the commits since the previous tag")
     notes.add_argument("tag", nargs="?", help="default: the latest version tag")
 
     hot = sub.add_parser("hotfix", help="branch hotfix/X.Y.Z+1 from the released tag X.Y.Z; `release -rc` there ships the patch")
-    hot.add_argument("tag", help="the released final: X.Y.Z or <artifact>-X.Y.Z")
+    hot.add_argument("tag", help="the released final tag, in any form of tag_format (default X.Y.Z or <artifact>-X.Y.Z)")
 
     edit = sub.add_parser("edit", help="edit hooks, connectors, order, and connector config (interactive without args)")
     edit.add_argument("words", nargs=argparse.REMAINDER, help="one editor command, e.g. `config set platform-deploy jira_project_key DEMO`")
@@ -207,8 +209,17 @@ def update_command(ns: argparse.Namespace) -> None:
     elif ns.config_only:
         asked = update.ensure_config(defaults=ns.defaults, log=info)
         info(f"config saved: {', '.join(asked)}" if asked else "config: nothing new to ask")
+        _add_cursor_review_if_just_enabled(asked)
     else:
-        update.update(defaults=ns.defaults, log=info)
+        _add_cursor_review_if_just_enabled(update.update(defaults=ns.defaults, log=info))
+
+
+def _add_cursor_review_if_just_enabled(asked: list[str]) -> None:
+    """Homebrew and uv installs never run install.sh, so a yes to cursor-review here also installs its connector."""
+    if "cursor-review.notify" not in asked or cx.load_release_toml().get("cursor-review", {}).get("notify") is not True:
+        return
+    if "cursor-review" not in cx.load_global()["connectors"]:
+        connector_add("cursor-review", defaults=True)
 
 
 def after_install(root: Path, *, defaults: bool, ask: prompts.Ask = input) -> None:
@@ -270,7 +281,7 @@ def resolve_sha(url: str, ref: str) -> str:
 def install(url: str, sha: str) -> list[dict[str, str]]:
     uv = shutil.which("uv")
     if uv is None:
-        raise cx.ConnectorError("uv is required: curl -LsSf https://astral.sh/uv/install.sh | sh")
+        raise cx.ConnectorError(f"uv is required to install a connector from a URL: {update.uv_install_hint()}")
     if not cx.env_python().is_file():
         _run([uv, "venv", str(cx.env_dir())])
     _run([uv, "pip", "install", "--python", str(cx.env_python()), "--reinstall", f"git+{url}@{sha}"])
@@ -419,14 +430,15 @@ def post_push(
     start: str | None = None,
     only: str | None = None,
     ask: prompts.Ask = input,
+    report: dict[str, Any] | None = None,
 ) -> bool:
     """The post-push phase. Returns False when a connector failed. Never resets or deletes tags."""
     conns = cx.resolve(cx.load_global(), cfg.connectors, warn=warn)
     if not conns:
         info("CONNECTORS: none")
         return True
-    context = cx.build_context(cwd, gitops.remote_url(), cfg.artifact, release_version, sha)
-    state = cx.load_state(context["repo"], release_version) or cx.new_state(context)
+    context = cx.build_context(cwd, gitops.remote_url(), cfg.tags, release_version, sha)
+    state = cx.load_state(context["repo"], context["tag"]) or cx.new_state(context)
     state.update({k: v for k, v in context.items() if k != "protocol"})
     saved = state.setdefault("connectors", {})
     names = [c.name for c in conns]
@@ -444,19 +456,24 @@ def post_push(
         prior = _prior_from(saved, names[:idx])
     return cx.run_chain(
         context, selected, state=state, prior=prior, cwd=cwd, project=dict(cfg.connectors),
-        defaults=defaults, dry_run=dry_run, log=info, ask=ask, alert=alert,
+        defaults=defaults, dry_run=dry_run, log=info, ask=ask, alert=alert, report=report,
     )
 
 
-def release_version_of(tag: str, artifact: str) -> str:
-    version = tag[len(artifact) + 1 :] if tag.startswith(f"{artifact}-") else tag
-    try:
-        parsed = parse(version)
-    except PlanError as exc:
-        raise cx.ConnectorError(f"{tag} is not a release tag of {artifact}") from exc
-    if parsed.snapshot:
+def release_version_of(tag: str, artifact: str, formats: tuple[str, ...] | None = None) -> str:
+    """The version a tag names, given in any configured form (default: X.Y.Z or <artifact>-X.Y.Z)."""
+    scheme = TagScheme(formats or DEFAULT, artifact)
+    version = scheme.version_of(tag)
+    if version is None:
+        raise cx.ConnectorError(f"{tag} is not a release tag of {artifact} (expected {' or '.join(scheme.formats)})")
+    if parse(version).snapshot:
         raise cx.ConnectorError(f"{tag} is a SNAPSHOT, not a release tag")
     return version
+
+
+def _version_and_primary(cfg: Config, tag: str) -> tuple[str, str]:
+    version = release_version_of(tag, cfg.artifact, cfg.tag_format)
+    return version, cfg.tags.primary(version)
 
 
 def _require_project(cwd: Path) -> Config:
@@ -469,7 +486,7 @@ def _require_project(cwd: Path) -> Config:
 def connectors_run(tag: str, *, start: str | None, only: str | None, defaults: bool, dry_run: bool) -> None:
     cwd = Path.cwd()
     cfg = _require_project(cwd)
-    version = release_version_of(tag, cfg.artifact)
+    version, primary = _version_and_primary(cfg, tag)
     gitops.current_repo()
     if not gitops.remote_tag_exists(tag):
         raise cx.ConnectorError(f"tag {tag} is not on origin; connectors only run for pushed tags")
@@ -478,16 +495,16 @@ def connectors_run(tag: str, *, start: str | None, only: str | None, defaults: b
     try:
         ok = post_push(cwd, cfg, version, gitops.tag_commit(tag), defaults=defaults, dry_run=dry_run, start=start, only=only)
     except (cx.ChainInterrupted, KeyboardInterrupt):
-        info(f"interrupted. the tag stays. see: release connectors status {version}")
+        info(f"interrupted. the tag stays. see: release connectors status {primary}")
         raise SystemExit(130) from None
     if not ok:
-        fail(f"a connector did not finish for {version}; the tag stays. see: release connectors status {version}")
+        fail(f"a connector did not finish for {primary}; the tag stays. see: release connectors status {primary}")
 
 
 def connectors_status(tag: str) -> None:
     cwd = Path.cwd()
     cfg = _require_project(cwd)
-    version = release_version_of(tag, cfg.artifact)
+    _version, version = _version_and_primary(cfg, tag)  # runs are saved under the primary tag
     repo = cx.repo_name(gitops.remote_url(), cwd)
     state = cx.load_state(repo, version)
     if state is None:
@@ -524,7 +541,7 @@ def status_data(cwd: Path, *, fetch: bool) -> dict[str, Any]:
         "branch": repo.branch,
         "dirty": bool(gitops.porcelain()),
         "origin": None,
-        "last_tag": github_release.latest_tag(gitops.tags()),
+        "last_tag": github_release.latest_tag(gitops.tags(), cfg.tags),
         "connectors": {},
     }
     try:
@@ -563,9 +580,11 @@ def history_data(cwd: Path, *, limit: int, finals: bool) -> dict[str, Any]:
     """Version tags newest first, each joined with the connector runs saved on this machine. Read-only."""
     if limit < 1:
         raise ConfigError("--limit must be at least 1")
+    cfg = load(cwd)
+    scheme = cfg.tags if cfg else TagScheme()
     gitops.current_repo()
     repo = cx.repo_name(gitops.remote_url(), cwd)
-    versions = [(github_release._key(v), tag, v) for tag in gitops.tags() if (v := github_release._plain(tag)) is not None]
+    versions = [(github_release._key(v), tag, v) for tag in gitops.tags() if (v := github_release._plain(tag, scheme)) is not None]
     versions = [item for item in versions if not (finals and item[2].rc is not None)]
     releases = []
     for _, tag, version in sorted(versions, reverse=True)[:limit]:
@@ -603,13 +622,13 @@ def history(cwd: Path, *, limit: int, finals: bool, as_json: bool) -> None:
 
 
 def undo(cwd: Path, tag: str, *, force: bool, ask: prompts.Ask = input) -> None:
-    """Delete a pushed RC's two tags. The version commits stay: the next `release -rc` takes the next number."""
+    """Delete a pushed RC's tags (every configured form). The version commits stay: the next `release -rc` takes the next number."""
     cfg = _require_project(cwd)
-    version = release_version_of(tag, cfg.artifact)
+    version, primary = _version_and_primary(cfg, tag)
     if parse(version).rc is None:
         raise cx.ConnectorError(f"{version} is a final release; only release candidates can be undone")
     gitops.current_repo()
-    tags = [version, f"{cfg.artifact}-{version}"]
+    tags = cfg.tags.render(version)
     remote = [t for t in tags if gitops.remote_tag_exists(t)]
     local = [t for t in tags if gitops.tag_exists_local(t)]
     if not remote and not local:
@@ -624,21 +643,23 @@ def undo(cwd: Path, tag: str, *, force: bool, ask: prompts.Ask = input) -> None:
     for name in local:
         gitops.delete_local_tag(name)
     repo = cx.repo_name(gitops.remote_url(), cwd)
-    if cursor_review.cancel(repo, version):
+    if cursor_review.cancel(repo, primary):
         info("cancelled the pending cursor-review")
-    cx.state_path(repo, version).unlink(missing_ok=True)
-    info(f"deleted the tags of {version}. if a GitHub Release or a deploy was made from it, remove that too (e.g. gh release delete {version})")
+    cx.state_path(repo, primary).unlink(missing_ok=True)
+    info(f"deleted the tags of {version}. if a GitHub Release or a deploy was made from it, remove that too (e.g. gh release delete {primary})")
 
 
 def notes(cwd: Path, tag: str | None) -> None:
     cfg = load(cwd)
+    scheme = cfg.tags if cfg else TagScheme()
     if tag is None:
-        tag = github_release.latest_tag(gitops.tags())
+        tag = github_release.latest_tag(gitops.tags(), scheme)
         if tag is None:
             raise cx.ConnectorError("no version tags yet")
-    version = release_version_of(tag, cfg.artifact) if cfg else tag
+    elif cfg:
+        tag = _version_and_primary(cfg, tag)[1]
     try:
-        print(github_release.release_notes(cwd, version))
+        print(github_release.release_notes(cwd, tag, scheme))
     except github_release.NotesError as exc:
         raise cx.ConnectorError(str(exc)) from exc
 

@@ -82,10 +82,15 @@ def check_install(global_cfg: dict[str, Any] | None) -> list[Check]:
     out.append(
         _ok("tool uv", "found")
         if uv
-        else _warn("tool uv", "uv not found; connectors and `release update` need it", "curl -LsSf https://astral.sh/uv/install.sh | sh")
+        else _warn("tool uv", "uv not found; connectors installed from a URL need it", update.uv_install_hint())
     )
     if global_cfg and "github-release" in global_cfg["connectors"]:
         out.extend(_check_gh())
+    channel = update.managed_channel()
+    if channel is not None:
+        version = update._installed_version() or "?"
+        out.append(_ok("install", f"release-cli {version}, installed with {channel.name} (upgrade: {channel.upgrade})"))
+        return out
     if not git_ok:
         return out
     src = update.find_source()
@@ -193,9 +198,17 @@ def check_project(cwd: Path, global_cfg: dict[str, Any] | None) -> list[Check]:
         out.append(_ok("project version", f"{version} in {cfg.version_file}"))
     except (AdapterError, PlanError) as exc:
         out.append(_fail("project version", str(exc), f"check version_file ({cfg.version_file}) in the project config"))
+    if cfg.tool == "go":
+        out.append(_check_go())
     out.extend(_check_overrides(cfg.connectors, global_cfg))
     out.extend(_check_git(cwd))
     return out
+
+
+def _check_go() -> Check:
+    if shutil.which("go") is None:
+        return _warn("tool go", "go not found; `go test` hooks and Go builds need it", "install Go (https://go.dev/dl)")
+    return _ok("tool go", "found")
 
 
 def _check_overrides(project: dict[str, Any], global_cfg: dict[str, Any] | None) -> list[Check]:

@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 
 from release_cli import adapters, prompts
-from release_cli.adapters.base import AdapterError
+from release_cli.adapters.base import AdapterError, ProjectState
 from release_cli.config import (
     LOCAL_NAME,
     TEAM_NAME,
@@ -96,6 +96,8 @@ def _hints(tool: str, cwd: Path) -> tuple[str, str]:
         return "mvn test", "mvn deploy"
     if tool == "sbt":
         return "sbt test", "sbt publish"
+    if tool == "go":
+        return "go test ./...", "none (the version is a file: nothing to publish from a hook)"
     wrapper = (cwd / "gradlew").is_file() or (cwd / "gradlew.bat").is_file()
     exe = "./gradlew" if wrapper else "gradle"
     return f"{exe} test", f"{exe} publish"
@@ -106,6 +108,8 @@ def _collect_hooks(prompter: Prompter, tool: str, cwd: Path, log) -> tuple[Hook,
     log(f"hint before: {before_hint}  |  hint after: {after_hint}")
     log("after = publish (run once the release version is written; before would publish SNAPSHOT)")
     hooks: list[Hook] = []
+    if tool == "go" and prompter.confirm("Run `go test ./...` before each release?", False):
+        hooks.append(Hook(when="before", cmd="go test ./..."))
     add = prompter.confirm("Add a command to run during release?", False)
     while add:
         cmd = prompter.ask("Command")
@@ -117,6 +121,16 @@ def _collect_hooks(prompter: Prompter, tool: str, cwd: Path, log) -> tuple[Hook,
             hooks.append(Hook(when=when, cmd=cmd))
         add = prompter.confirm("Add another?", False)
     return tuple(hooks)
+
+
+def _ensure_version_file(cwd: Path, state: ProjectState, prompter: Prompter, log) -> None:
+    path = cwd / state.version_file
+    if path.is_file():
+        return
+    if not prompter.confirm(f"No {state.version_file} found. Create it with {state.version}?", True):
+        raise InitError(f"init cancelled: a Go project keeps its version in {state.version_file}; create it with one line like {state.version}")
+    path.write_text(state.version + "\n", encoding="utf-8")
+    log(f"created {state.version_file} ({state.version}); commit it before the first release")
 
 
 def initialize(
@@ -156,8 +170,12 @@ def initialize(
         raise InitError(str(exc)) from exc
 
     artifact = prompter.ask("Artifact name", state.artifact) or state.artifact
+    if chosen == "go":
+        _ensure_version_file(cwd, state, prompter, log)
     hooks = _collect_hooks(prompter, chosen, cwd, log)
-    cfg = Config(tool=chosen, artifact=artifact, version_file=state.version_file, hooks=hooks)  # type: ignore[arg-type]
+    # Go modules and `go install` only see `v` tags.
+    tag_format = ("v{version}",) if chosen == "go" else None
+    cfg = Config(tool=chosen, artifact=artifact, version_file=state.version_file, hooks=hooks, tag_format=tag_format)  # type: ignore[arg-type]
     share = prompter.confirm("Share this config with the team (write release.toml)?", False)
     write_local(cwd, cfg)
     dirtied = False

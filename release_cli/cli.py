@@ -12,6 +12,7 @@ from release_cli import connectors as cx
 from release_cli.adapters.base import AdapterError
 from release_cli.config import Config, ConfigError, load
 from release_cli.connectors import ChainInterrupted, ConnectorError
+from release_cli.github_release import TOOL_COMMIT_PREFIX
 from release_cli.hooks import HookError, run_hooks
 from release_cli.init import InitError, initialize
 from release_cli.prompts import PromptError
@@ -57,7 +58,7 @@ commands:
   release status [--json]   release history [--limit N] [--finals] [--json]
   release notes [tag]   release undo <rc-tag>
   release hotfix <X.Y.Z>   (branch hotfix/X.Y.Z+1 from a released tag; `release -rc` there ships the patch)
-  release update   (pull the release-cli clone and reinstall, from any directory)
+  release update   (pull the clone and reinstall; under Homebrew or uv it prints the upgrade command)
   release doctor [--json]   (why release would not work here; changes nothing)
   release secret set|rm <name>   release secret ls   (tokens and webhook URLs: OS keychain, never a config file)
 
@@ -68,7 +69,7 @@ CI: --defaults with --json (one JSON object on stdout) or --quiet (result line o
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="release",
-        description="Create a release candidate or finalize it. Rewrites only the project version field for Maven, Gradle, or sbt.",
+        description="Create a release candidate or finalize it. Rewrites only the project version field for Maven, Gradle, sbt, or Go (VERSION file).",
         epilog=HELP_EPILOG,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -94,7 +95,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--force", action="store_true", help="with --init, overwrite existing config")
     parser.add_argument("--skip-hooks", action="store_true", help="do not prompt or run hooks (connectors still run)")
     parser.add_argument("--skip-connectors", action="store_true", help="do not run connectors after the push")
-    parser.add_argument("--tool", choices=("maven", "gradle", "sbt"), help="with --init, force this build tool")
+    parser.add_argument("--tool", choices=("maven", "gradle", "sbt", "go"), help="with --init, force this build tool")
     out = parser.add_mutually_exclusive_group()
     out.add_argument("-q", "--quiet", action="store_true", help="print only the result line and errors (hook output goes to stderr)")
     out.add_argument("--json", action="store_true", help="print one JSON object on stdout (also on errors); everything else on stderr")
@@ -221,7 +222,9 @@ def _scm_for(cfg: Config, artifact: str, version: str, *, snapshot: bool) -> str
         return None
     if snapshot:
         return "HEAD"
-    return f"{artifact}-{version}"
+    tags = cfg.tags.render(version)
+    legacy = f"{artifact}-{version}"
+    return legacy if legacy in tags else tags[0]
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -265,7 +268,7 @@ def _release(ns: argparse.Namespace) -> None:
     release_ver = planned.release.format()
     snapshot_ver = planned.next_snapshot.format()
     artifact = cfg.artifact or state.artifact
-    tags = [release_ver, f"{artifact}-{release_ver}"]
+    tags = cfg.tags.render(release_ver)
     version_path = cwd / cfg.version_file
     original = version_path.read_text(encoding="utf-8") if version_path.is_file() else ""
 
@@ -287,6 +290,7 @@ def _release(ns: argparse.Namespace) -> None:
 
     summary = {"tool": cfg.tool, "artifact": artifact, "version": release_ver, "next_snapshot": snapshot_ver, "tags": tags}
     if ns.dry_run:
+        dry_report: dict = {}
         run_hooks(cfg.hooks, "before", defaults=False, skip=False, dry_run=True, log=info, ask=input)
         preview_cfg_files = _preview_write(adapter, cwd, cfg, release_ver, artifact)
         if not preview_cfg_files:
@@ -300,14 +304,26 @@ def _release(ns: argparse.Namespace) -> None:
                 head = gitops.current_repo().sha
             except gitops.GitError:
                 head = "HEAD"
-            _post_push(cwd, cfg, release_ver, head, ns, dry_run=True)
+            _post_push(cwd, cfg, release_ver, head, ns, dry_run=True, report=dry_report)
+        failed = [name for name, entry in dry_report.get("connectors", {}).items() if entry["status"] != "ok"]
+        if failed:
+            fail(f"dry-run: {', '.join(failed)} did not finish ok; nothing was tagged, pushed or published")
         info("no files written")
         problems = _preflight(tags)
         if problems:
             fail("dry-run: the release would stop before the hooks:\n- " + "\n- ".join(problems))
         info("PREFLIGHT: ok (clean tree, tags free, up to date with origin)")
         result(f"dry-run ok: {artifact} {release_ver} (tags {', '.join(tags)})")
-        emit({**summary, "ok": True, "dry_run": True, "files": sorted(preview_cfg_files)})
+        emit(
+            {
+                **summary,
+                "ok": True,
+                "dry_run": True,
+                "files": sorted(preview_cfg_files),
+                "dry_run_dir": dry_report.get("dir"),
+                "connectors": dry_report.get("connectors", {}),
+            }
+        )
         return
 
     problems = _preflight(tags)
@@ -344,7 +360,7 @@ def _release(ns: argparse.Namespace) -> None:
             ask=input,
         )
         rel_names = [str(path.relative_to(cwd)) for path in changed]
-        gitops.commit(rel_names, f"[manual-release] Prepare release {release_ver}")
+        gitops.commit(rel_names, f"{TOOL_COMMIT_PREFIX} Prepare release {release_ver}")
         for tag in tags:
             gitops.annotate_tag(tag, f"Release {tag}")
             tagged.append(tag)
@@ -355,7 +371,7 @@ def _release(ns: argparse.Namespace) -> None:
             snapshot_ver,
             scm_tag=_scm_for(cfg, artifact, release_ver, snapshot=True),
         )
-        gitops.commit(rel_names, f"[manual-release] Prepare for next iteration ({snapshot_ver})")
+        gitops.commit(rel_names, f"{TOOL_COMMIT_PREFIX} Prepare for next iteration ({snapshot_ver})")
         pushing = True
         gitops.push_atomic(tags)
     except BaseException as exc:
@@ -363,7 +379,7 @@ def _release(ns: argparse.Namespace) -> None:
         if pushing and isinstance(exc, KeyboardInterrupt):
             on_origin = _on_origin(tags[0])
             if on_origin:
-                fail(f"interrupted after the push: {release_ver} is released. run the connectors: release connectors run {release_ver}", 130)
+                fail(f"interrupted after the push: {release_ver} is released. run the connectors: release connectors run {tags[0]}", 130)
             if on_origin is None:
                 fail(
                     f"interrupted during the push and origin cannot be checked; {tags[0]} may already be there, so nothing "
@@ -380,7 +396,7 @@ def _release(ns: argparse.Namespace) -> None:
         raise
 
     result(_paint(GREEN, "RELEASE") + f" {artifact}-{release_ver} " + _paint(GREEN, "FINISHED!"))
-    summary["sha"] = gitops.tag_commit(release_ver)
+    summary["sha"] = gitops.tag_commit(tags[0])
     if planned.release.rc is None:
         nxt = planned.next_snapshot
         nxt_start = f"{nxt.major}.{nxt.minor}.{nxt.patch + 1}" if on_hotfix else f"{nxt.major}.{nxt.minor + 1}.0"
@@ -394,7 +410,7 @@ def _release(ns: argparse.Namespace) -> None:
         emit({**summary, "ok": True, "dry_run": False, "connectors": {}})
         return
     ok = _post_push(cwd, cfg, release_ver, summary["sha"], ns, dry_run=False)
-    saved = cx_state(cwd, release_ver)
+    saved = cx_state(cwd, tags[0])
     if not ok:
         fail(
             f"release {release_ver} is pushed and its tags stay; a connector did not finish (see above to resume)",
@@ -431,11 +447,15 @@ def cx_state(cwd: Path, release_ver: str) -> dict[str, str]:
     return {name: entry.get("status") for name, entry in state.get("connectors", {}).items()}
 
 
-def _post_push(cwd: Path, cfg: Config, release_ver: str, sha: str, ns: argparse.Namespace, *, dry_run: bool) -> bool:
+def _post_push(
+    cwd: Path, cfg: Config, release_ver: str, sha: str, ns: argparse.Namespace, *, dry_run: bool, report: dict | None = None
+) -> bool:
     try:
-        return commands.post_push(cwd, cfg, release_ver, sha, defaults=ns.defaults, dry_run=dry_run)
+        return commands.post_push(cwd, cfg, release_ver, sha, defaults=ns.defaults, dry_run=dry_run, report=report)
     except (ChainInterrupted, KeyboardInterrupt):
-        fail(f"interrupted. the tags stay pushed. see: release connectors status {release_ver}", 130, pushed=True, version=release_ver)
+        if dry_run:
+            fail("interrupted. nothing was tagged, pushed or published", 130)
+        fail(f"interrupted. the tags stay pushed. see: release connectors status {cfg.tags.primary(release_ver)}", 130, pushed=True, version=release_ver)
     except (ConnectorError, ConfigError) as exc:
         fail(f"{exc} (release {release_ver} tags are not touched)")
 

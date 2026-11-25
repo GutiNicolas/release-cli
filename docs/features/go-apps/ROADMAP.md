@@ -42,7 +42,7 @@ under `packages/playwright`); the design stays generic for any Go app.
   local run lacks (*to verify in T-08*). So phase 3 signs with a maintainer key: a `sign` connector (cosign, key-based,
   no identity published) signs `checksums.txt` and attaches an in-toto SLSA provenance statement for every
   archive. It runs in the same chain, on a laptop or in the local CI. The npm package ships without provenance at
-  launch. CI-identity provenance (attestations, npm provenance) is phase 5, once Actions has quota.
+  launch. CI-identity provenance (attestations, npm provenance) was phase 5, dropped: CI stays local.
 - **`go install` path:** ldflags do not apply, so the binary reads its version from `runtime/debug.ReadBuildInfo`
   when the stamped one is `dev` (app-side, in localci's adoption task).
 - **Public repo:** plan, code, tests and fixtures name no private company, repo, host or path; fixtures use `acme/*`.
@@ -80,7 +80,7 @@ Build flags are fixed: `-trimpath`, `GOOS`/`GOARCH` per target, `GOFLAGS=-mod=re
 <binary>_<version>_<os>_<arch>.tar.gz    # one per target: <binary>, plus archive_files
 checksums.txt                            # "<sha256>  <file>" per line, sorted by file name
 <npm-name>-<version>.tgz                 # npm pack, when npm-publish is enabled
-<binary>.rb                              # Homebrew formula (finals; rendered in dry-run too)
+<binary>.rb                              # Homebrew formula (finals): lives in the tap repo, not on the GitHub Release; also in the dry-run folder
 install.sh                               # installer: detects os/arch, downloads, verifies checksums.txt
 manifest.json
 checksums.txt.sig                        # phase 3: cosign signature bundle of checksums.txt
@@ -96,44 +96,97 @@ Results: `github-release` adds `"assets": [names]`; `npm-publish` `{"name", "ver
 **Secrets:** `npm-token` (or the user's `npm login`), `homebrew-tap-token`, `cosign-key` and `cosign-password` (phase 3); names in config, values via `release secret`.
 
 ## Phases and tasks
-<!-- Release PR: release/go-apps-p<n> → main; last reviewed commit: -->
+<!-- Release PR: release/go-apps-p<n> → main; last reviewed commit: 85e66a3 (2026-11-22, 6 findings: 0 critical, 0 high, 1 medium, 5 low) -->
+**Phase 1 release:** merged 2026-11-22 via [#20](https://github.com/GutiNicolas/release-cli/pull/20) (merge commit fe3feee); `release/go-apps-p1` deleted.
 ### Phase 1: Go projects and `v` tags (shippable alone: `release -rc` tags a Go app)
 | Task | Repo | Depends on | Status | PR | Note |
 |---|---|---|---|---|---|
-| [T-01](tasks/T-01.md) Configurable tag format (`v` tags) | release-cli | — | todo | | |
-| [T-02](tasks/T-02.md) `go` tool: detection and `VERSION` file | release-cli | T-01 | todo | | |
+| [T-01](tasks/T-01.md) Configurable tag format (`v` tags) | release-cli | — | merged | [#19](https://github.com/GutiNicolas/release-cli/pull/19) | |
+| [T-02](tasks/T-02.md) `go` tool: detection and `VERSION` file | release-cli | T-01 | merged | [#21](https://github.com/GutiNicolas/release-cli/pull/21) | |
 
 ### Phase 2: build and publish connectors, dry-run that builds
+**Phase 2 release:** merged 2026-11-23 via [#23](https://github.com/GutiNicolas/release-cli/pull/23) (merge commit 62612bc); last reviewed: aced88d (2026-11-23; round 1 at 888348f: 9 findings, 0 critical, 0 high, 4 medium fixed, 5 low open; round 2 over the fixes: 1 low).
 | Task | Repo | Depends on | Status | PR | Note |
 |---|---|---|---|---|---|
-| [T-03](tasks/T-03.md) Dry-run runs connectors that declare it safe | release-cli | P1 | todo | | |
-| [T-04](tasks/T-04.md) `go-build` connector and Go fixture | release-cli | T-03 | todo | | |
-| [T-05](tasks/T-05.md) `github-release` uploads the manifest's assets | release-cli | T-04 | todo | | parallel with T-06, T-07 |
-| [T-06](tasks/T-06.md) `npm-publish` connector (lockstep) | release-cli | T-04 | todo | | parallel |
-| [T-07](tasks/T-07.md) `homebrew-tap` connector and install script | release-cli | T-04 | todo | | parallel |
+| [T-03](tasks/T-03.md) Dry-run runs connectors that declare it safe | release-cli | P1 | merged | [#22](https://github.com/GutiNicolas/release-cli/pull/22) | |
+| [T-04](tasks/T-04.md) `go-build` connector and Go fixture | release-cli | T-03 | merged | [#24](https://github.com/GutiNicolas/release-cli/pull/24) | |
+| [T-05](tasks/T-05.md) `github-release` uploads the manifest's assets | release-cli | T-04 | merged | [#26](https://github.com/GutiNicolas/release-cli/pull/26) | parallel with T-06, T-07 |
+| [T-06](tasks/T-06.md) `npm-publish` connector (lockstep) | release-cli | T-04 | merged | [#25](https://github.com/GutiNicolas/release-cli/pull/25) | parallel |
+| [T-07](tasks/T-07.md) `homebrew-tap` connector and install script | release-cli | T-04 | merged | [#27](https://github.com/GutiNicolas/release-cli/pull/27) | parallel |
 
 ### Phase 3: signed provenance, local (before localci's launch)
+**Phase 3 release:** merged 2026-11-23 via [#29](https://github.com/GutiNicolas/release-cli/pull/29) (merge commit bdae463); last reviewed: 9fe985c (2026-11-23; round 1 at e644460: 6 findings, 0 critical, 0 high, 2 medium fixed, 4 low open; round 2 over the fixes: 0).
 | Task | Repo | Depends on | Status | PR | Note |
 |---|---|---|---|---|---|
-| [T-08](tasks/T-08.md) `sign` connector: cosign signature and SLSA provenance | release-cli | P2 | todo | | |
+| [T-08](tasks/T-08.md) `sign` connector: cosign signature and SLSA provenance | release-cli | P2 | merged | [#28](https://github.com/GutiNicolas/release-cli/pull/28) | |
 
 ### Phase 4: first consumer
+**Phase 4 release (T-11):** merged 2026-11-24 via [#31](https://github.com/GutiNicolas/release-cli/pull/31) (merge commit bf2c296); last reviewed: 99d3abd (2026-11-24; 1 low open: a `builder_id` with a query or fragment is accepted and gives a malformed `buildType`). T-09 closes when localci's T-22 merges.
+**Phase 4 release (T-12):** merged 2026-11-24 via [#33](https://github.com/GutiNicolas/release-cli/pull/33) (merge commit 3fe21f8); reviewed in the release session: 1 medium fixed before merge (`fix(T-12)` d77838e: dependency code could read the npm token during `npm ci`).
 | Task | Repo | Depends on | Status | PR | Note |
 |---|---|---|---|---|---|
-| [T-09](tasks/T-09.md) localci releases with release-cli (acceptance) | localci | P3 | todo | | replaces the build part of localci's T-22 |
+| [T-11](tasks/T-11.md) `sign`: configurable provenance builder id | release-cli | P3 | merged | [#30](https://github.com/GutiNicolas/release-cli/pull/30) | localci's T-22 needs it: its public provenance must not name the tool |
+| [T-12](tasks/T-12.md) `npm-publish` builds the package from the release commit | release-cli | T-11 | merged | [#32](https://github.com/GutiNicolas/release-cli/pull/32) | localci's T-22 dry-run: `prepack` (`tsc`) fails in the archive |
+| [T-09](tasks/T-09.md) localci releases with release-cli (acceptance) | localci | T-11, T-12, localci's T-22 | merged | localci #46 (merged in its #45) | ships as localci's T-22 (its plan, its worker, base `release/localci-p4`); no separate worker. Done when T-22 merges with these criteria met |
 
-### Phase 5: CI-identity provenance (when GitHub Actions has quota; after launch)
+### Phase 5: CI-identity provenance (dropped 2026-11-24: CI is local, no GitHub Actions)
 | Task | Repo | Depends on | Status | PR | Note |
 |---|---|---|---|---|---|
-| [T-10](tasks/T-10.md) `gh-workflow` connector, GitHub attestations, npm provenance | release-cli | P4 | todo | | not before Actions quota |
+| [T-10](tasks/T-10.md) `gh-workflow` connector, GitHub attestations, npm provenance | release-cli | P4 | dropped | | CI runs locally (localci); GitHub identity provenance needs Actions. Key-signed provenance (T-08) is the provenance |
+
+## Handoff (2026-11-24)
+- **Published:** phases 1 to 3; phase 4's T-11 (#31) and T-12 (#33). localci's phase 4 (its T-22 = T-09 here) is on
+  localci's main: its dry-run builds, signs (throwaway key) and packs every file a launch needs.
+- **In flight:** nothing. Phase 4 is done: T-09 `merged` (the maintainer's key is in the Keychain, `cosign.pub` on
+  localci's main). Its first signed release runs in localci's launch task (T-34).
+- **Next steps:** none: the feature is done (phase 5 dropped, CI stays local). Open lows: see the Log (phases 2 and 3, and `builder_id` with a query).
 
 ## Open questions
 - Where the private signing key lives for the local CI (keychain on the maintainer's machine, or a local CI secret) — user, in T-09.
 - npm package name and scope, tap repo name — user (localci's open question, settled in T-09).
 - localci's T-22 (planned on GoReleaser) is rewritten to consume this after approval — localci's planning session.
+- localci's plan asks for a configurable provenance builder id before its T-22 (the `sign` statement names
+  release-cli as the builder today), and treats the tool's name as private although this repo is public — user.
+  The builder id part is now T-11; the naming mismatch stays open.
 
 ## Log
 - 2026-11-22: plan written (feature intake). Build and publish as connectors per the user. Not yet approved.
 - 2026-11-22: user decisions: native build, `VERSION` file (T-02 reworked), naming localci here is fine. Provenance at launch still open.
 - 2026-11-22: provenance before launch, in the local CI: phase 3 is now key-signed provenance (T-08 `sign`); the GitHub workflow work moved to phase 5 (T-10).
 - 2026-11-22: approved by the user; plan put on main through a docs-only PR.
+- 2026-11-22: phase 1 merged to main (#20): T-01, T-02 and one review fix (`fix(T-01)`: `tag_format` refuses templates git cannot tag). Phase 2 is ready to dispatch.
+- 2026-11-22: phase 1 merged to main (#20): T-01, T-02 and one review fix (fix(T-01): `tag_format` refuses templates git cannot tag). Phase 2 is ready to dispatch.
+- 2026-11-23: phase 2 merged to main (#23): T-03 to T-07 and four review fixes (`fix(T-06)`: npm packs `package_dir` from the release commit; `fix(T-07)`: homebrew-tap skips when github-release did not publish; `fix(T-05)`: assets compared by digest, not size; the formula is not a release asset). Open lows for later: hotfix overwriting a newer formula, archive extras collisions, `GOFLAGS` overwritten, install.sh hardening, timeouts on go/git/gh, `tarfile` `filter=` needs Python 3.11.4+. Phase 3 (T-08 `sign`) is ready to dispatch.
+- 2026-11-23: phase 3 merged to main (#29): T-08 and two review fixes (`fix(T-08)`: the provenance source is an https URL for SSH remotes and never empty; archives and `checksums.txt` are checked against disk before signing). Open lows for later: key file left if `sign` is SIGKILLed, cosign inherits every `RELEASE_SECRET_*`, cosign 3.x not enforced, a failed `sign` with `break_on_error=false` lets `github-release` upload unsigned files without a warning. Not yet run: signing with the real maintainer key (phase 4). Phase 4 (T-09, localci) is ready to dispatch.
+- 2026-11-23: dispatch found T-09 not ready: localci's T-22 does the same work in the same files, waits on localci's
+  T-21 and wave 1, and `release/localci-p4` is not cut. The user linked them: T-09 ships through T-22, no
+  separate worker; `integrate` here marks T-09 once T-22 is integrated in localci.
+- 2026-11-24: T-11 added to phase 4 (autonomous run the user asked for): localci's T-22 contract needs the `sign`
+  provenance to carry a configurable builder id, and today `builder.id`, `builder.version` and `buildType` all name
+  the tool. T-09 now also waits on T-11.
+- 2026-11-24: T-11 merged to main (#31, merge commit bf2c296): `[connectors.sign] builder_id`. Reviewed in the release
+  session, no fix before merge; one low open (query or fragment in `builder_id`). `release/go-apps-p4` deleted. T-09
+  waits on localci's T-22 (which needs the maintainer's cosign key pair).
+- 2026-11-24: T-12 added to phase 4 and dispatched: localci's T-22 dry-run showed `npm-publish` cannot pack a
+  TypeScript workspace package (the `git archive` of `package_dir` has no `node_modules`; `prepack` fails). Still from
+  the release commit: whole-commit archive plus `npm ci` when there is a lockfile. Also seen: the installed tool was
+  stale (rejected `tool = "go"`); reinstall it from main after this release.
+- 2026-11-24: T-12 merged to main (#33, merge commit 3fe21f8) with one review fix (`fix(T-12)`: `npm ci --ignore-scripts`
+  without the token, and no `RELEASE_SECRET_*` for `npm ci`/`npm pack`). #33 was merged before its own checks finished;
+  the same code was green on #32 and main's run was checked afterwards. Tool reinstalled from main for localci's T-22.
+- 2026-11-24: localci's T-22 merged (its #45). T-09 set to `blocked`: everything but the real-key criteria passed on
+  dry-runs; those need the maintainer's key pair (before localci's launch).
+- 2026-11-24: the maintainer's signing key generated: the private key and its password are only in the macOS Keychain
+  (`cosign-key`, `cosign-password`), `cosign.pub` committed to localci's main (1c134fe). Checked: the Keychain key signs
+  a blob the way `sign` does (signing config, bundle) and it verifies with the committed `cosign.pub`. localci's
+  CONTRIBUTING verify command was wrong for bundles (`--signature` fails); fixed in the same commit. T-09 `merged`.
+- 2026-11-24: phase 5 (T-10) dropped (user: no billing, CI runs locally with localci). GitHub attestations and npm
+  `--provenance` need a GitHub Actions identity token, so they don't apply; releases keep the key-signed provenance
+  from `sign`. go-apps is done.
+- 2026-11-24: fix found while launching localci: `homebrew-tap` committed the formula with no committer, so GitHub used
+  the token account's primary email (public on a public tap). Now it uses the released repo's git identity: #34
+  (3be6913), test-first, CI green; tool reinstalled.
+- 2026-11-24: the tool's own commits use the `[release-cli]` prefix (user's request): #35 (4228ae4); release notes
+  still drop the older `[manual-release]` commits. Tool reinstalled. localci's `v0.1.0` (cut before) has
+  `[manual-release]` commits; its next release would name the tool in its public history (open question for the user).
+- 2026-11-24: the user confirmed T-10 stays dropped (no local equivalent wanted). go-apps is closed: phases 1 to 4 merged, phase 5 dropped.
