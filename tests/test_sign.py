@@ -8,6 +8,7 @@ config handed to cosign names no transparency log, so nothing is uploaded.
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 import os
 import re
@@ -18,7 +19,7 @@ from typing import Any
 
 import pytest
 
-from release_cli import go_build, secrets, sign
+from release_cli import go_build, packaging, secrets, sign
 from release_cli.connectors import parse_run
 
 FIXTURE = Path(__file__).parent / "fixtures" / "go-app"
@@ -339,3 +340,53 @@ def test_dry_run_with_builder_id_signs_a_neutral_statement_that_still_verifies(r
     for archive in _archives(out):
         att = _cosign("verify-blob-attestation", *verify, "--bundle", attestation.name, "--type", "slsaprovenance1", archive.name, cwd=out)
         assert att.returncode == 0, att.stderr
+
+
+def _windows_release(tmp_path: Path) -> tuple[Path, dict[str, Any]]:
+    """A built Windows release (a .zip and the bare .exe, as cargo-build lays it out) and a dry-run sign request for it."""
+    stage, out = tmp_path / "stage", tmp_path / "out"
+    stage.mkdir()
+    exe = stage / f"hello_{VERSION}_windows_amd64.exe"
+    exe.write_bytes(b"MZ-not-a-real-exe")
+    packaging.write_zip(stage / f"hello_{VERSION}_windows_amd64.zip", [("hello.exe", exe.read_bytes(), 0o755)])
+    artifacts = [packaging.entry(stage / exe.name.replace(".exe", ".zip"), "archive", "windows", "amd64"), packaging.entry(exe, "binary", "windows", "amd64")]
+    manifest = packaging.finish(stage, out, artifacts, app="hello", version=VERSION, tag=TAG, sha="c" * 40, build={"profile": "release"})
+    req = {
+        "protocol": 1, "action": "run", "repo_root": str(tmp_path), "artifact": "hello", "release_version": VERSION, "tag": TAG, "tags": [TAG],
+        "tag_format": ["v{version}"], "mode": "rc", "dry_run": True, "out_dir": str(out), "config": {}, "remote_url": "https://github.com/acme/hello.git",
+        "prior": {"go-build": {"status": "ok", "result": manifest, "error": None, "job_id": None}},
+    }
+    return out, req
+
+
+@needs_cosign
+def test_a_bare_binary_is_signed_and_is_a_provenance_subject(tmp_path: Path) -> None:
+    out, req = _windows_release(tmp_path)
+    resp = sign.run(req)
+    assert resp["ok"], resp
+    exe = f"hello_{VERSION}_windows_amd64.exe"
+    assert resp["result"]["signed"] == ["checksums.txt", exe, f"hello_{VERSION}_windows_amd64.zip"]
+    envelope = json.loads((out / f"hello_{VERSION}.intoto.jsonl").read_text())["dsseEnvelope"]
+    subjects = {s["name"]: s["digest"]["sha256"] for s in json.loads(base64.b64decode(envelope["payload"]))["subject"]}
+    assert subjects[exe] == hashlib.sha256((out / exe).read_bytes()).hexdigest() and len(subjects) == 2
+    verify = ["--key", "cosign.pub", "--insecure-ignore-tlog", "--bundle", f"hello_{VERSION}.intoto.jsonl", "--type", "slsaprovenance1"]
+    assert _cosign("verify-blob-attestation", *verify, exe, cwd=out).returncode == 0  # the exe a user downloads checks against it
+    (out / exe).write_bytes(b"swapped")
+    assert _cosign("verify-blob-attestation", *verify, exe, cwd=out).returncode != 0
+
+
+@needs_cosign
+@pytest.mark.parametrize("tamper", ["changed", "deleted", "not-in-checksums"])
+def test_a_binary_that_changed_or_is_unlisted_fails_closed(tamper: str, tmp_path: Path) -> None:
+    out, req = _windows_release(tmp_path)
+    exe = out / f"hello_{VERSION}_windows_amd64.exe"
+    if tamper == "changed":
+        exe.write_bytes(exe.read_bytes() + b"x")
+    elif tamper == "deleted":
+        exe.unlink()
+    else:
+        lines = (out / "checksums.txt").read_text().splitlines(keepends=True)
+        (out / "checksums.txt").write_text("".join(ln for ln in lines if exe.name not in ln))
+    resp = sign.run(req)
+    assert resp["ok"] is False and (exe.name in resp["error"] or "checksums.txt" in resp["error"]), resp
+    assert not any((out / n).exists() for n in ("checksums.txt.sig", f"hello_{VERSION}.intoto.jsonl", "cosign.pub"))
