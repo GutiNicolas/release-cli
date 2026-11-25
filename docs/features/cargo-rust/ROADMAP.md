@@ -91,9 +91,9 @@ Triple → `os`/`arch`: `x86_64-pc-windows-*` → `windows/amd64`, `aarch64-pc-w
 Release PR: — · last reviewed: — · last signed off: — · open: —
 | Task | Repo | Depends on | Status | PR | Note |
 |---|---|---|---|---|---|
-| [T-01](tasks/T-01.md) Spike: Windows GUI exe cross-compiled on macOS (xwin, then mingw) | release-cli | — | todo | | gate: the user runs the exe on their Windows PC |
-| [T-02](tasks/T-02.md) `cargo` tool: detection, `Cargo.toml` + `Cargo.lock` versions | release-cli | — | todo | | parallel |
-| [T-03](tasks/T-03.md) Shared packaging: zip, bare binary, `sign` covers binaries | release-cli | — | todo | | parallel |
+| [T-01](tasks/T-01.md) Spike: Windows GUI exe cross-compiled on macOS (xwin, then mingw) | release-cli | — | in progress | | gate: the user runs the exe on their Windows PC |
+| [T-02](tasks/T-02.md) `cargo` tool: detection, `Cargo.toml` + `Cargo.lock` versions | release-cli | — | in progress | | parallel |
+| [T-03](tasks/T-03.md) Shared packaging: zip, bare binary, `sign` covers binaries | release-cli | — | in progress | | parallel |
 
 ### Phase 2: build connector
 Release PR: — · last reviewed: — · last signed off: — · open: —
