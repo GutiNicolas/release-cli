@@ -305,3 +305,11 @@ def test_install_template_is_shellcheck_clean() -> None:
     template = Path(go_build.__file__).parent / "templates" / "install.sh"
     done = subprocess.run(["shellcheck", str(template)], capture_output=True, text=True)
     assert done.returncode == 0, done.stdout
+
+
+def test_the_formula_ignores_the_windows_zip_and_the_bare_exe(tmp_path: Path) -> None:
+    manifest = _manifest(tmp_path / "dist")
+    plain = homebrew_tap.render_formula(manifest, "hello", "https://example.test/dl", "https://example.test", "d")
+    for name, kind in [(f"hello_{VERSION}_windows_amd64.zip", "archive"), (f"hello_{VERSION}_windows_amd64.exe", "binary")]:
+        manifest["artifacts"].append({"name": name, "kind": kind, "os": "windows", "arch": "amd64", "sha256": "f" * 64, "size": 1})
+    assert homebrew_tap.render_formula(manifest, "hello", "https://example.test/dl", "https://example.test", "d") == plain

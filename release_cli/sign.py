@@ -1,8 +1,8 @@
-"""Built-in connector `sign`: sign a Go release with a maintainer key and attach signed SLSA provenance.
+"""Built-in connector `sign`: sign a release (Go or Rust) with a maintainer key and attach signed SLSA provenance.
 
 Runs after `go-build` (it reads its manifest from `prior`). With `cosign`:
   * signs `checksums.txt` -> `checksums.txt.sig` (a cosign bundle),
-  * writes an in-toto statement with a SLSA provenance predicate (subjects: every archive and its sha256; builder:
+  * writes an in-toto statement with a SLSA provenance predicate (subjects: every archive and bare binary with its sha256; builder:
     release-cli and its version, or the configured `builder_id`; source: repo, tag, commit; the build flags) and signs it with `cosign attest-blob`
     -> `<binary>_<version>.intoto.jsonl`,
   * copies the public key next to them as `cosign.pub`,
@@ -40,6 +40,7 @@ DEFAULT_KEY_SECRET = "cosign-key"
 DEFAULT_PASSWORD_SECRET = "cosign-password"
 DEFAULT_PUBLIC_KEY = "cosign.pub"
 SIGNATURE = "checksums.txt.sig"
+SUBJECT_KINDS = ("archive", "binary")
 PUBLIC_KEY_NAME = "cosign.pub"
 REPO_URL = "https://github.com/GutiNicolas/release-cli"
 STATEMENT_TYPE = "https://in-toto.io/Statement/v1"
@@ -192,11 +193,12 @@ def _release_cli_version() -> str:
 
 
 def statement(manifest: dict[str, Any], req: dict[str, Any], builder_id: str | None = None) -> dict[str, Any]:
-    """The in-toto statement: SLSA provenance for every archive of the manifest. With `builder_id` the builder is that
-    URL, the build type hangs off it and no tool name or version appears; without it the builder is release-cli."""
-    archives = sorted((a for a in manifest["artifacts"] if isinstance(a, dict) and a.get("kind") == "archive"), key=lambda a: a["name"])
+    """The in-toto statement: SLSA provenance for every archive and bare binary of the manifest. With `builder_id` the
+    builder is that URL, the build type hangs off it and no tool name or version appears; without it the builder is
+    release-cli."""
+    archives = sorted(_subjects(manifest), key=lambda a: a["name"])
     if not archives:
-        raise SignError("the go-build manifest lists no archive to attest")
+        raise SignError("the build manifest lists no archive to attest")
     tag, sha = manifest.get("tag") or tag_of(req), manifest["commit"]
     repo = _source_repository(req.get("remote_url"))
     if builder_id:
@@ -221,12 +223,17 @@ def statement(manifest: dict[str, Any], req: dict[str, Any], builder_id: str | N
     }
 
 
+def _subjects(manifest: dict[str, Any]) -> list[dict[str, Any]]:
+    """What people download, so what is signed, checked on disk and attested: the `archive` and `binary` entries."""
+    return [a for a in manifest["artifacts"] if isinstance(a, dict) and a.get("kind") in SUBJECT_KINDS]
+
+
 def _entry(path: Path, kind: str) -> dict[str, Any]:
     return {"name": path.name, "kind": kind, "sha256": _sha256(path), "size": path.stat().st_size}
 
 
 def _check_on_disk(out_dir: Path, manifest: dict[str, Any]) -> None:
-    """Fail closed unless every archive on disk still has the digest go-build recorded and checksums.txt lists."""
+    """Fail closed unless every archive and binary on disk still has the digest the build recorded and checksums.txt lists."""
     checksums = out_dir / "checksums.txt"
     if not checksums.is_file():
         raise SignError(f"checksums.txt is missing from {out_dir}")
@@ -236,16 +243,16 @@ def _check_on_disk(out_dir: Path, manifest: dict[str, Any]) -> None:
         if name:
             listed[name] = digest
     for entry in manifest["artifacts"]:
-        if not isinstance(entry, dict) or entry.get("kind") not in ("archive", "checksums"):
+        if not isinstance(entry, dict) or entry.get("kind") not in (*SUBJECT_KINDS, "checksums"):
             continue
         path = out_dir / entry["name"]
         if not path.is_file():
-            raise SignError(f"{entry['name']} is missing from {out_dir}; run go-build again")
+            raise SignError(f"{entry['name']} is missing from {out_dir}; run the build connector again")
         actual = _sha256(path)
         if actual != entry.get("sha256"):
-            raise SignError(f"{entry['name']} changed since go-build (sha256 {actual[:12]}... on disk, manifest says {str(entry.get('sha256'))[:12]}...); run go-build again")
-        if entry["kind"] == "archive" and listed.get(entry["name"]) != actual:
-            raise SignError(f"checksums.txt does not list the sha256 of {entry['name']} that is on disk; run go-build again")
+            raise SignError(f"{entry['name']} changed since the build (sha256 {actual[:12]}... on disk, manifest says {str(entry.get('sha256'))[:12]}...); run the build connector again")
+        if entry["kind"] in SUBJECT_KINDS and listed.get(entry["name"]) != actual:
+            raise SignError(f"checksums.txt does not list the sha256 of {entry['name']} that is on disk; run the build connector again")
 
 
 def _sign_all(cosign: Cosign, pub: Path, out_dir: Path, manifest: dict[str, Any], req: dict[str, Any], builder_id: str | None = None) -> list[dict[str, Any]]:
@@ -260,7 +267,8 @@ def _sign_all(cosign: Cosign, pub: Path, out_dir: Path, manifest: dict[str, Any]
     for stale in (sig, attestation):
         stale.unlink(missing_ok=True)
     # the statement's subjects are the archives, so it is checked against an archive, never against checksums.txt
-    sample = out_dir / next(a["name"] for a in manifest["artifacts"] if isinstance(a, dict) and a.get("kind") == "archive")
+    subjects = _subjects(manifest)
+    sample = out_dir / next((a["name"] for a in subjects if a["kind"] == "archive"), subjects[0]["name"])
     config = cosign.workdir / "signing-config.json"
     config.write_text(json.dumps(SIGNING_CONFIG), encoding="utf-8")
     cosign.run("sign-blob", "--key", str(cosign.key), "--signing-config", str(config), "--bundle", str(sig), "--yes", str(checksums))
@@ -330,7 +338,7 @@ def run(req: dict[str, Any]) -> dict[str, Any]:
         _update_manifest(out_dir, added)
     except (SignError, secrets.SecretError, OSError) as exc:
         return _fail(str(exc))
-    subjects = ["checksums.txt", *(a["name"] for a in manifest["artifacts"] if isinstance(a, dict) and a.get("kind") == "archive")]
+    subjects = ["checksums.txt", *(a["name"] for a in _subjects(manifest))]
     print(f"sign: {len(added)} files added in {out_dir}", file=sys.stderr)
     return {"protocol": 1, "ok": True, "result": {"signed": subjects, "public_key": PUBLIC_KEY_NAME, "tlog": False, "artifacts": added}}
 

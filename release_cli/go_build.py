@@ -10,33 +10,25 @@ commit built is then HEAD. Nothing is uploaded or published here.
 
 from __future__ import annotations
 
-import gzip
-import hashlib
-import io
 import json
 import os
 import re
 import shutil
 import subprocess
 import sys
-import tarfile
-import tempfile
 from pathlib import Path
 from typing import Any
 
+from release_cli import packaging
+from release_cli.packaging import BuildError
 from release_cli.tagformat import tag_of
 
 DEFAULT_TARGETS = ["darwin/amd64", "darwin/arm64", "linux/amd64", "linux/arm64"]
 DEFAULT_LDFLAGS = "-s -w -X main.version={version}"
 TARGET_RE = re.compile(r"^[a-z0-9]+/[a-z0-9]+$")
 GO_MISSING = "`go` is not on PATH; install Go (https://go.dev/dl) and make sure `go version` works in this shell"
-ERROR_TAIL = 15
 GITHUB_SLUG = re.compile(r"^(?:https?://(?:[^@/]+@)?github\.com/|ssh://git@github\.com(?::\d+)?/|git@github\.com:)([^/\s]+)/([^/\s]+?)(?:\.git)?/?$")
 INSTALLER = Path(__file__).parent / "templates" / "install.sh"
-
-
-class BuildError(RuntimeError):
-    pass
 
 
 def questions(req: dict[str, Any]) -> dict[str, Any]:
@@ -94,36 +86,6 @@ def _render_installer(dest: Path, base: str, binary: str, version: str, tag: str
     dest.chmod(0o755)
 
 
-def _git(root: Path, *args: str) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(["git", *args], cwd=root, capture_output=True, text=True, check=False)
-
-
-def _tail(text: str) -> str:
-    return "\n".join(text.strip().splitlines()[-ERROR_TAIL:])
-
-
-def _sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as fh:
-        for chunk in iter(lambda: fh.read(1 << 20), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
-
-
-def _add(tar: tarfile.TarFile, name: str, data: bytes, mode: int) -> None:
-    info = tarfile.TarInfo(name)
-    info.size, info.mode, info.mtime = len(data), mode, 0
-    tar.addfile(info, io.BytesIO(data))
-
-
-def _archive(dest: Path, files: list[tuple[str, bytes, int]]) -> None:
-    """A reproducible tar.gz: fixed times and owners, so the same commit gives the same checksum."""
-    with dest.open("wb") as raw, gzip.GzipFile(filename="", mode="wb", fileobj=raw, mtime=0) as gz:
-        with tarfile.open(fileobj=gz, mode="w", format=tarfile.GNU_FORMAT) as tar:
-            for name, data, mode in files:
-                _add(tar, name, data, mode)
-
-
 def _build_target(src: Path, work: Path, spec: dict[str, Any], version: str, target: str, goos: str, goarch: str) -> Path:
     exe = spec["binary"] + (".exe" if goos == "windows" else "")
     out = work / f"bin-{goos}-{goarch}" / exe
@@ -135,31 +97,12 @@ def _build_target(src: Path, work: Path, spec: dict[str, Any], version: str, tar
     env = {**os.environ, "GOOS": goos, "GOARCH": goarch, "CGO_ENABLED": "1" if spec["cgo"] else "0", "GOFLAGS": "-mod=readonly"}
     proc = subprocess.run(cmd, cwd=src, env=env, capture_output=True, text=True, check=False)
     if proc.returncode != 0:
-        raise BuildError(f"go build failed for {target}: {_tail(proc.stderr or proc.stdout) or f'exit {proc.returncode}'}")
+        raise BuildError(f"go build failed for {target}: {packaging.tail(proc.stderr or proc.stdout) or f'exit {proc.returncode}'}")
     return out
 
 
-def _build(root: Path, sha: str, out_dir: Path, req: dict[str, Any], spec: dict[str, Any]) -> dict[str, Any]:
-    version, tag = req["release_version"], tag_of(req)
-    with tempfile.TemporaryDirectory(prefix="go-build-") as tmp:
-        work = Path(tmp)
-        src = work / "src"
-        added = _git(root, "worktree", "add", "--detach", str(src), sha)
-        if added.returncode != 0:
-            raise BuildError(f"could not check out {sha} to build it: {_tail(added.stderr)}")
-        try:
-            return _package(src, work, out_dir, req, spec, version, tag, sha)
-        finally:
-            _git(root, "worktree", "remove", "--force", str(src))
-            _git(root, "worktree", "prune")
-
-
 def _package(src: Path, work: Path, out_dir: Path, req: dict[str, Any], spec: dict[str, Any], version: str, tag: str, sha: str) -> dict[str, Any]:
-    extras = []
-    for rel in spec["files"]:
-        path = (src / rel).resolve()
-        if src.resolve() in path.parents and path.is_file():
-            extras.append((path.name, path.read_bytes(), 0o644))
+    extras = packaging.collect_files(src, spec["files"])
     stage = work / "stage"
     stage.mkdir()
     artifacts: list[dict[str, Any]] = []
@@ -168,26 +111,17 @@ def _package(src: Path, work: Path, out_dir: Path, req: dict[str, Any], spec: di
         print(f"go-build: {target}", file=sys.stderr)
         binary = _build_target(src, work, spec, version, target, goos, goarch)
         name = f"{spec['binary']}_{version}_{goos}_{goarch}.tar.gz"
-        _archive(stage / name, [(binary.name, binary.read_bytes(), 0o755), *extras])
-        artifacts.append({"name": name, "kind": "archive", "os": goos, "arch": goarch, "sha256": _sha256(stage / name), "size": (stage / name).stat().st_size})
-    artifacts.sort(key=lambda a: a["name"])
-    checksums = stage / "checksums.txt"
-    checksums.write_text("".join(f"{a['sha256']}  {a['name']}\n" for a in artifacts), encoding="utf-8")
-    artifacts.append({"name": "checksums.txt", "kind": "checksums", "sha256": _sha256(checksums), "size": checksums.stat().st_size})
+        packaging.write_tar_gz(stage / name, [(binary.name, binary.read_bytes(), 0o755), *extras])
+        artifacts.append(packaging.entry(stage / name, "archive", goos, goarch))
+    installed = []
     if base := download_base(req):
         installer = stage / "install.sh"
         _render_installer(installer, base, spec["binary"], version, tag)
-        artifacts.append({"name": "install.sh", "kind": "installer", "sha256": _sha256(installer), "size": installer.stat().st_size})
+        installed.append(packaging.entry(installer, "installer"))
     else:
         print("go-build: the remote is not on github.com, so install.sh is not rendered", file=sys.stderr)
     build = {"main": spec["main"], "targets": spec["targets"], "ldflags": spec["ldflags"], "cgo": spec["cgo"], "flags": ["-trimpath", "-mod=readonly"]}
-    manifest = {"app": req.get("artifact") or spec["binary"], "version": version, "tag": tag, "commit": sha, "dir": str(out_dir), "artifacts": artifacts, "build": build}
-    (stage / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
-    # every target built: only now does anything reach the output folder, so a failure leaves no partial manifest
-    out_dir.mkdir(parents=True, exist_ok=True)
-    for item in sorted(stage.iterdir()):
-        shutil.copy2(item, out_dir / item.name)
-    return manifest
+    return packaging.finish(stage, out_dir, artifacts, app=req.get("artifact") or spec["binary"], version=version, tag=tag, sha=sha, build=build, extras=installed)
 
 
 def _fail(error: str, **result: Any) -> dict[str, Any]:
@@ -200,17 +134,9 @@ def run(req: dict[str, Any]) -> dict[str, Any]:
     root = Path(req["repo_root"])
     try:
         spec = _settings(req)
-        version = req["release_version"]
-        if req.get("dry_run"):
-            if not req.get("out_dir"):
-                raise BuildError("dry run without an out_dir to write into")
-            out_dir = Path(req["out_dir"])
-        else:
-            out_dir = root / "dist" / version
-            if _git(root, "check-ignore", "-q", "--", f"dist/{version}/manifest.json").returncode != 0:
-                raise BuildError("`dist/` is not git-ignored; add `dist/` to .gitignore (the artifacts must never be committed), then resume")
-            shutil.rmtree(out_dir, ignore_errors=True)
-        manifest = _build(root, req["sha"], out_dir, req, spec)
+        out_dir = packaging.output_dir(root, req)
+        with packaging.checkout(root, req["sha"], "go-build") as (work, src):
+            manifest = _package(src, work, out_dir, req, spec, req["release_version"], tag_of(req), req["sha"])
     except (BuildError, OSError) as exc:
         return _fail(str(exc))
     print(f"go-build: {len(manifest['artifacts'])} files in {out_dir}", file=sys.stderr)
