@@ -209,6 +209,17 @@ def test_run_uploads_every_manifest_asset_but_the_npm_tgz_and_resume_sends_only_
     assert resumed.result["uploaded"] == ["install.sh"]
 
 
+def test_run_uploads_the_windows_zip_and_the_bare_exe(repo: Path, fake_gh: Path, tmp_path: Path) -> None:
+    prior = _manifest_prior(tmp_path)
+    result = prior["go-build"]["result"]
+    for name, kind in [("app_1.0.0_windows_amd64.zip", "archive"), ("app_1.0.0_windows_amd64.exe", "binary")]:
+        (tmp_path / "dist" / name).write_bytes(name.encode())
+        result["artifacts"].append({"name": name, "kind": kind, "os": "windows", "arch": "amd64", "sha256": "x", "size": len(name)})
+    out = parse_run(gr.run({**_req(repo, "1.0.0-rc1"), "prior": prior}))
+    assert out.status == "ok"
+    assert {"app_1.0.0_windows_amd64.zip", "app_1.0.0_windows_amd64.exe"} <= set(_uploads(fake_gh))
+
+
 def _sign_prior(tmp_path: Path, status: str = "ok") -> dict:
     out = tmp_path / "dist"
     files = []

@@ -101,6 +101,18 @@ archive_files = ["LICENSE", "README.md"]      # added next to the binary when pr
 
 Every build uses `-trimpath` and `GOFLAGS=-mod=readonly`. The output, in `dist/<version>/` (`dist/` must be git-ignored; the connector refuses otherwise), is one `<binary>_<version>_<os>_<arch>.tar.gz` per target, `checksums.txt` (`shasum -a 256 -c checksums.txt` verifies it) and `manifest.json`, which lists every file with its sha256 and size for the connectors that publish them. If any target fails to compile, nothing is written and the connector fails with the compiler output.
 
+The files of a release, as every build connector lays them out (`manifest.json` has one entry per file, with its `kind`; `os` and `arch` on archives and binaries):
+
+| File | `kind` | Listed in `checksums.txt` |
+| --- | --- | --- |
+| `<binary>_<version>_<os>_<arch>.tar.gz` | `archive` | yes |
+| `<binary>_<version>_windows_<arch>.zip` (reproducible: sorted entries, fixed dates and modes) | `archive` | yes |
+| `<binary>_<version>_windows_<arch>.exe` (the bare executable) | `binary` | yes |
+| `checksums.txt` | `checksums` | no |
+| `install.sh` | `installer` | no |
+
+`sign` checks and attests every `archive` and `binary`; `github-release` uploads every file of the manifest.
+
 `release --dry-run` runs it too, building HEAD into a temporary folder it prints (`DRY-RUN DIR`) and publishing nothing, so the artifacts can be checked before the tag exists.
 
 When the remote is on github.com it also renders `install.sh` next to the archives (listed in the manifest as kind `installer`), so users can install a release with `curl -fsSL <release url>/install.sh | sh`. The script is POSIX `sh`: it detects Linux or macOS and amd64 or arm64, downloads the archive and `checksums.txt` from the release, checks the archive's sha256 (`sha256sum` or `shasum -a 256`) and refuses to install on a mismatch. `VERSION` (default: the release the script came from) and `PREFIX` (default `/usr/local`, the binary goes to `PREFIX/bin`) can be set in the environment: `curl -fsSL <release url>/install.sh | PREFIX=$HOME/.local sh`.
@@ -170,7 +182,7 @@ release secret set cosign-key                  # paste it
 release secret set cosign-password             # the password you chose
 ```
 
-`cosign-key` holds the key file's content (or its base64, as above, because `release secret set` reads one line). In a local CI set `RELEASE_SECRET_COSIGN_KEY` and `RELEASE_SECRET_COSIGN_PASSWORD` instead. The key is written to a private temporary file only while cosign runs, then deleted, and it is never printed or kept in the run state. After signing, `sign` checks its own output with `cosign.pub`, so a public key that is not the pair of the private key fails the release step instead of shipping files nobody can verify. A missing `cosign` or secret fails with the command that fixes it. The repository named in the provenance is the `origin` remote as an `https://` URL (SSH remotes are converted); if no repository can be derived from it, `sign` fails instead of signing an empty source. Before signing, every archive is hashed again and compared with `go-build`'s manifest and `checksums.txt`: if a file changed since `go-build`, `sign` fails naming it and signs nothing (run `go-build` again). `release --dry-run` signs with a throwaway key generated in the dry-run folder, so the whole chain is checked without the real key.
+`cosign-key` holds the key file's content (or its base64, as above, because `release secret set` reads one line). In a local CI set `RELEASE_SECRET_COSIGN_KEY` and `RELEASE_SECRET_COSIGN_PASSWORD` instead. The key is written to a private temporary file only while cosign runs, then deleted, and it is never printed or kept in the run state. After signing, `sign` checks its own output with `cosign.pub`, so a public key that is not the pair of the private key fails the release step instead of shipping files nobody can verify. A missing `cosign` or secret fails with the command that fixes it. The repository named in the provenance is the `origin` remote as an `https://` URL (SSH remotes are converted); if no repository can be derived from it, `sign` fails instead of signing an empty source. Before signing, every archive and bare binary is hashed again and compared with `go-build`'s manifest and `checksums.txt`: if a file changed since the build, `sign` fails naming it and signs nothing (run `go-build` again). `release --dry-run` signs with a throwaway key generated in the dry-run folder, so the whole chain is checked without the real key.
 
 **Verify a release** (anyone, with the files from the GitHub Release and `cosign.pub`):
 

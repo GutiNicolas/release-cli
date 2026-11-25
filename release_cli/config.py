@@ -14,8 +14,8 @@ from release_cli import tagformat
 LOCAL_NAME = ".release"
 TEAM_NAME = "release.toml"
 When = Literal["before", "after"]
-Tool = Literal["maven", "gradle", "sbt", "go"]
-TOOLS: tuple[Tool, ...] = ("maven", "gradle", "sbt", "go")
+Tool = Literal["maven", "gradle", "sbt", "go", "cargo"]
+TOOLS: tuple[Tool, ...] = ("maven", "gradle", "sbt", "go", "cargo")
 CONNECTOR_LISTS = ("order", "enabled", "disabled")
 _BARE_KEY = re.compile(r"^[A-Za-z0-9_-]+$")
 

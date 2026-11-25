@@ -95,7 +95,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--force", action="store_true", help="with --init, overwrite existing config")
     parser.add_argument("--skip-hooks", action="store_true", help="do not prompt or run hooks (connectors still run)")
     parser.add_argument("--skip-connectors", action="store_true", help="do not run connectors after the push")
-    parser.add_argument("--tool", choices=("maven", "gradle", "sbt", "go"), help="with --init, force this build tool")
+    parser.add_argument("--tool", choices=("maven", "gradle", "sbt", "go", "cargo"), help="with --init, force this build tool")
     out = parser.add_mutually_exclusive_group()
     out.add_argument("-q", "--quiet", action="store_true", help="print only the result line and errors (hook output goes to stderr)")
     out.add_argument("--json", action="store_true", help="print one JSON object on stdout (also on errors); everything else on stderr")
