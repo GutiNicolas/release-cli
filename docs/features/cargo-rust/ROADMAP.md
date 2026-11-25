@@ -88,12 +88,12 @@ Triple → `os`/`arch`: `x86_64-pc-windows-*` → `windows/amd64`, `aarch64-pc-w
 
 ## Phases and tasks
 ### Phase 1: Rust projects tag, shared packaging, the cross-compile spike (shippable: `release -rc` tags a Rust app)
-Release PR: — · last reviewed: — · last signed off: — · open: —
+Release PR: [#7](https://github.com/GutiNicolas/release-cli/pull/7) (draft until T-01) · last reviewed: — · last signed off: — · open: —
 | Task | Repo | Depends on | Status | PR | Note |
 |---|---|---|---|---|---|
 | [T-01](tasks/T-01.md) Spike: Windows GUI exe cross-compiled on macOS (xwin, then mingw) | release-cli | — | in progress | | gate: the user runs the exe on their Windows PC |
-| [T-02](tasks/T-02.md) `cargo` tool: detection, `Cargo.toml` + `Cargo.lock` versions | release-cli | — | in progress | | parallel |
-| [T-03](tasks/T-03.md) Shared packaging: zip, bare binary, `sign` covers binaries | release-cli | — | in progress | | parallel |
+| [T-02](tasks/T-02.md) `cargo` tool: detection, `Cargo.toml` + `Cargo.lock` versions | release-cli | — | integrated | [#5](https://github.com/GutiNicolas/release-cli/pull/5) | parallel; lock check likely ran in CI (ubuntu has cargo), not run locally |
+| [T-03](tasks/T-03.md) Shared packaging: zip, bare binary, `sign` covers binaries | release-cli | — | integrated | [#6](https://github.com/GutiNicolas/release-cli/pull/6) | parallel |
 
 ### Phase 2: build connector
 Release PR: — · last reviewed: — · last signed off: — · open: —
@@ -122,3 +122,5 @@ Release PR: — · last reviewed: — · last signed off: — · open: —
   files T-01–T-04 written.
 - 2026-11-24: approved by the user; plan put on main through a docs-only PR. Hypothesis and definition of done still
   pending in the user's words; the consumer's repo is named in its own plan.
+- 2026-11-25: integrate p1: T-02 (#5) and T-03 (#6) squash-merged into `release/cargo-rust-p1`; draft release PR #7.
+  T-01 still in progress (no PR yet).
