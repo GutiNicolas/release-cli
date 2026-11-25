@@ -15,11 +15,11 @@ GRADLE_MARKERS = (
 )
 SBT_MARKERS = ("build.sbt",)
 GO_MARKERS = ("go.mod",)
+CARGO_MARKERS = ("Cargo.toml",)
 SBT_DIR_MARKERS = (Path("project") / "build.properties",)
 
 OTHER_HINTS = (
     "package.json",
-    "Cargo.toml",
     "pyproject.toml",
 )
 
@@ -38,6 +38,8 @@ def detect(cwd: Path) -> list[Tool]:
         found.append("sbt")
     if _has_any(cwd, GO_MARKERS):
         found.append("go")
+    if _has_any(cwd, CARGO_MARKERS):
+        found.append("cargo")
     return found
 
 
@@ -51,5 +53,5 @@ def describe_unsupported(cwd: Path) -> str:
     extra = extras(cwd)
     known = ", ".join(TOOLS)
     if extra:
-        return f"no maven/gradle/sbt/go project found (saw {', '.join(extra)}). supported: {known}"
-    return f"no maven/gradle/sbt/go project found. supported: {known}"
+        return f"no maven/gradle/sbt/go/cargo project found (saw {', '.join(extra)}). supported: {known}"
+    return f"no maven/gradle/sbt/go/cargo project found. supported: {known}"

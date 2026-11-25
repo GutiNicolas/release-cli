@@ -18,6 +18,7 @@
   <a href="#gradle"><img alt="Gradle" src="https://img.shields.io/badge/Gradle-02303A?logo=gradle&logoColor=white"></a>
   <a href="#sbt"><img alt="sbt" src="https://img.shields.io/badge/sbt-DC322F?logo=scala&logoColor=white"></a>
   <a href="#go"><img alt="Go" src="https://img.shields.io/badge/Go-00ADD8?logo=go&logoColor=white"></a>
+  <a href="#rust-cargo"><img alt="Rust" src="https://img.shields.io/badge/Rust-000000?logo=rust&logoColor=white"></a>
 </p>
 
 ```console
@@ -166,7 +167,7 @@ release -rc             # 1.5.0-rc1: the next candidate
 release -fv             # 1.5.0: the final, from the open candidate
 ```
 
-`--init` reads the files in the folder (it never runs Maven, Gradle, sbt or Go) and asks when it finds more than one build tool. It writes a local `.release` file and offers to add it to `.gitignore`. To share the settings with your team, opt in to a committed `release.toml`; a local `.release` still overrides it. Run `release --init --force` to detect again. `--init` never creates a release.
+`--init` reads the files in the folder (it never runs Maven, Gradle, sbt, Go or Cargo) and asks when it finds more than one build tool. It writes a local `.release` file and offers to add it to `.gitignore`. To share the settings with your team, opt in to a committed `release.toml`; a local `.release` still overrides it. Run `release --init --force` to detect again. `--init` never creates a release.
 
 ## Supported projects
 
@@ -176,6 +177,7 @@ release -fv             # 1.5.0: the final, from the open candidate
 | <a id="gradle"></a>**Gradle** | `settings.gradle(.kts)`, `build.gradle(.kts)` | `gradle.properties` (`version=`) or the root build file | `1.5.0`, `example-app-1.5.0` |
 | <a id="sbt"></a>**sbt** | `build.sbt`, `project/build.properties` | `version := "…"` in `version.sbt` or `build.sbt` | `1.5.0`, `example-app-1.5.0` |
 | <a id="go"></a>**Go** | `go.mod` | a `VERSION` file at the repo root | `v1.5.0` |
+| <a id="cargo"></a>**Rust (Cargo)** | `Cargo.toml` | `Cargo.toml` (and `Cargo.lock` when committed) | `v1.5.0` |
 
 Any tool can read the version from another file: set `version_file` in `.release`.
 
@@ -191,6 +193,17 @@ Any tool can read the version from another file: set `version_file` in `.release
 - offers `go test ./...` as a `before` hook.
 
 A release does not build anything by itself. To ship binaries, add the [`go-build`](docs/connectors.md#go-build) connector, and then [`github-release`](docs/connectors.md#github-release), [`sign`](docs/connectors.md#sign), [`homebrew-tap`](docs/connectors.md#homebrew-tap) and [`npm-publish`](docs/connectors.md#npm-publish) as you need them.
+
+### Rust (Cargo)
+
+The version stays in `Cargo.toml`: `[workspace.package] version` when there is one, otherwise the root `[package] version`. Workspace members follow it with `version.workspace = true`; a member that sets its own version is refused, and the message names its `Cargo.toml` (one version per repository). The version is `X.Y.Z`, `X.Y.Z-rcN`, with or without `-SNAPSHOT`.
+
+A release edits the text of `Cargo.toml` (quotes, comments and line endings stay) and, when `Cargo.lock` is committed, the `version` of each workspace member in it, so `cargo build --locked` keeps working. Both files go in the release commit. `release` never runs `cargo` to do this, so it works where Rust is not installed. `release --init` in a folder with `Cargo.toml`:
+
+- sets `tool = "cargo"` and `tag_format = ["v{version}"]`;
+- takes the artifact from `[package] name`; for a virtual workspace it proposes the only binary (or the only member) and asks you to confirm it.
+
+A release does not build anything by itself.
 
 ## Versioning
 

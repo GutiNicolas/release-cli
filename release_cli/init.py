@@ -98,6 +98,8 @@ def _hints(tool: str, cwd: Path) -> tuple[str, str]:
         return "sbt test", "sbt publish"
     if tool == "go":
         return "go test ./...", "none (the version is a file: nothing to publish from a hook)"
+    if tool == "cargo":
+        return "cargo test --locked", "none (the version is in Cargo.toml: nothing to publish from a hook)"
     wrapper = (cwd / "gradlew").is_file() or (cwd / "gradlew.bat").is_file()
     exe = "./gradlew" if wrapper else "gradle"
     return f"{exe} test", f"{exe} publish"
@@ -173,8 +175,8 @@ def initialize(
     if chosen == "go":
         _ensure_version_file(cwd, state, prompter, log)
     hooks = _collect_hooks(prompter, chosen, cwd, log)
-    # Go modules and `go install` only see `v` tags.
-    tag_format = ("v{version}",) if chosen == "go" else None
+    # Go modules and `go install` only see `v` tags; Rust projects follow the same convention.
+    tag_format = ("v{version}",) if chosen in ("go", "cargo") else None
     cfg = Config(tool=chosen, artifact=artifact, version_file=state.version_file, hooks=hooks, tag_format=tag_format)  # type: ignore[arg-type]
     share = prompter.confirm("Share this config with the team (write release.toml)?", False)
     write_local(cwd, cfg)
